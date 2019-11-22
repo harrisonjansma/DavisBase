@@ -50,6 +50,7 @@ def check_input(command):
 ####################################################################
 #TABLE FUNCTIONS for Harrison to complete
 
+
 def initialize_file(table_name, is_table):
     if is_table:
         file_type = ".tbl"
@@ -122,10 +123,9 @@ def dtype_to_int(dtype):
     "text":12}
     return mapping[dtype]
 
-def schema_to_formatstring(schema, value_list):
+def vals_to_bytes(schema, value_list):
     int2packstring={
     0:'x',
-    1:'b',
     2:'h',
     3:'i',
     4:'q',
@@ -136,27 +136,29 @@ def schema_to_formatstring(schema, value_list):
     10:'Q',
     11:'Q'
     }
+
     dtypes = [dtype_to_int(dt) for dt in schema]
-    format_string = ''
+    byte_string = b''
     for i, dt in enumerate(dtypes):
         #check for nulls
         if value_list[i] == None:
             dtypes[i] = 0
             dt=0
+            byte_string+=bytes([0])
+            continue
+
+        if dt==1:
+            byte_string += value_list[i].to_bytes(1, byteorder=sys.byteorder, signed=True)
+
         if dt in int2packstring:
-            format_string+=int2packstring[dt]
+            byte_string+=struct.pack(int2packstring[dt], value_list[i])
         #look for text
         elif dt==12:
             len_text = len(value_list[i])
             dtypes[i] = dt+len_text
-            value_list[i] = value_list[i].encode('ascii')
-            format_string = format_string + str(len_text) + 's'
-    for i in value_list:
-        try:
-            value_list.remove(None)
-        except:
-            break
-    return dtypes, format_string, value_list
+            byte_string += value_list[i].encode('ascii')
+
+    return dtypes, value_list, byte_string
 
 
 def create_cell_table(schema, value_list, is_interior, left_child_page=None,  rowid=None):
@@ -164,8 +166,9 @@ def create_cell_table(schema, value_list, is_interior, left_child_page=None,  ro
     assert(type(value_list)==list)
     assert(type(is_interior)==bool)
     is_leaf = not is_interior
-    dtypes, format_string, value_list = schema_to_formatstring(schema, value_list)
-    payload = bytes([len(dtypes)])+bytes(dtypes)+struct.pack(format_string, *value_list)
+
+    dtypes, value_list, byte_string = vals_to_bytes(schema, value_list)
+    payload = bytes([len(dtypes)])+bytes(dtypes)+byte_string
 
     if  is_interior:
         assert(left_child_page != None)
@@ -178,6 +181,42 @@ def create_cell_table(schema, value_list, is_interior, left_child_page=None,  ro
          raise ValueError("Error in cell creation")
     return cell_header + payload
 
+def body_tovalues(cell, num_columns):
+    int2packstring={
+    0:'x',
+    2:'h',
+    3:'i',
+    4:'q',
+    5:'f',
+    6:'d',
+    8:'b',
+    9:'i',
+    10:'Q',
+    11:'Q'
+    }
+    dtypes = [i for i in cell[:num_columns]]
+    cell = cell[num_columns:]
+    values = []
+
+    i = 0
+    for dt in dtypes:
+        #check for nulls
+        if dt==0:
+            values.append(None)
+            i+=1
+
+        if dt==1:
+            byte_string += value_list[i].from_bytes(1, byteorder=sys.byteorder, signed=True)
+            i+=1
+
+        if dt in int2packstring:
+            byte_string+=struct.pack(int2packstring[dt], value_list[i])
+        #look for text
+        elif dt==12:
+            len_text = len(value_list[i])
+            dtypes[i] = dt+len_text
+            byte_string += value_list[i].encode('ascii')
+    return format_string
 
 def read_cell(cell, is_table, is_interior):
     is_leaf = not is_interior
@@ -185,18 +224,30 @@ def read_cell(cell, is_table, is_interior):
 
     if  is_table and is_interior:
         cell_header = struct.unpack(endian+'ii', cell[0:8])
+        temp =cell[8:]
     elif is_table and is_leaf:
         cell_header = struct.unpack(endian+'hi', cell[0:6])
+        temp = cell[6:]
     elif is_index and is_interior:
         cell_header = struct.unpack(endian+'ih', cell[0:6])
+        temp = cell[6:]
     elif is_index and is_leaf:
         cell_header = struct.unpack(endian+'h', cell[0:2])
+        temp = cell[2:]
     else:
         print("error in read cell")
 
     if is_table:
-        cell_body =
-
+        num_columns = temp[0]
+        temp = temp[1:]
+        f_string = table_cell_intarray_to_formatstring(temp, num_columns)
+        temp = temp[num_columns:]
+        print(f_string)
+        print(len(temp))
+        print(temp[0:-24])
+        cell_body = struct.iter_unpack(endian+f_string, temp)
+    return cell_header, cell_body
+    
 
 def create_cell_index(schema, value_list, is_table, is_interior, left_child_page=None, bytes_in_payload=None, rowid=None):
     assert(type(is_table)==bool)
