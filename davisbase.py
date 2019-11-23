@@ -50,8 +50,8 @@ def check_input(command):
 ####################################################################
 #TABLE FUNCTIONS for Harrison to complete
 
-
 def initialize_file(table_name, is_table):
+    """Creates a file and writes the first, empty page (root)"""
     if is_table:
         file_type = ".tbl"
     else:
@@ -68,6 +68,7 @@ def initialize_file(table_name, is_table):
 
 
 def write_new_page(table_name, is_table, is_interior, rsibling_rchild, parent):
+    """Writes a empty page to the end of the file with an appropriate header for the kind of table/index"""
     assert(type(is_table)==bool)
     assert(type(is_interior)==bool)
     assert(type(rsibling_rchild)==int)
@@ -85,7 +86,6 @@ def write_new_page(table_name, is_table, is_interior, rsibling_rchild, parent):
     with open(table_name + file_type, 'wb') as f:
         f.seek(2,0) #seek end of file
         f.write(struct.pack('x'*PAGE_SIZE)) #write PAGE_SIZE placeholder bytes
-
         #Header
         f.seek(0, file_size)
         #first byte says what kind of page it is
@@ -99,185 +99,288 @@ def write_new_page(table_name, is_table, is_interior, rsibling_rchild, parent):
             f.write(b'\x0a')
         else:
              raise ValueError("Page must be table/index")
-
         f.write(b'\x00') #unused
         f.write(struct.pack(endian+'hhiixx', 0, PAGE_SIZE-1, rsibling_rchild, parent))
 
 
 
 def dtype_to_int(dtype):
+    """based on the documentation, each dtype has a single-digit integer encoding"""
     dtype = dtype.lower()
-    mapping = {
-    "null":0,
-    "tinyint":1,
-    "smallint":2,
-    "int":3,
-    "bigint":4,
-    "long":4,
-    'float':5,
-    "double":6,
-    "year":8,
-    "time":9,
-    "datetime":10,
-    "date":11,
-    "text":12}
+    mapping = {"null":0,"tinyint":1, "smallint":2, "int":3, "bigint":4, "long":4, 'float':5, "double":6, "year":8, "time":9, "datetime":10, "date":11, "text":12}
     return mapping[dtype]
 
-def vals_to_bytes(schema, value_list):
+
+def int_to_fstring(key):
+    """format string for use in struct.pack/struct.unpack"""
     int2packstring={
-    0:'x',
-    2:'h',
-    3:'i',
-    4:'q',
-    5:'f',
-    6:'d',
-    8:'b',
-    9:'i',
-    10:'Q',
-    11:'Q'
-    }
+    2:'h', 3:'i', 4:'q', 5:'f', 6:'d',
+    9:'i', 10:'Q', 11:'Q' }
+    return int2packstring[key]
 
+def schema_to_int(schema, values):
+    """given a list of data types ex [int, year] ,convert to single-digit integer appropriate."""
     dtypes = [dtype_to_int(dt) for dt in schema]
-    byte_string = b''
-    for i, dt in enumerate(dtypes):
-        #check for nulls
-        if value_list[i] == None:
-            dtypes[i] = 0
-            dt=0
-            byte_string+=bytes([0])
+    for i, val in enumerate(values):
+        if val==None: #regardless of the col dtype, if null-> dt = 0
+            dtypes[i]=0
             continue
+        elif dtypes[i]==12: #add the len of the string to dtype
+            dtypes[i]+=len(val)
+    return dtypes
 
-        if dt==1:
-            byte_string += value_list[i].to_bytes(1, byteorder=sys.byteorder, signed=True)
+def get_dt_size(dt):
+    """given the single-digit encoding for data type return the number of bytes this data takes"""
+    if dt==0:
+        return 0
+    if dt in [1,8]:
+        return 1
+    elif dt in [2]:
+        return 2
+    elif dt in [3,5,9]:
+        return 4
+    elif dt in [4,6,10,11]:
+        return 8
+    elif dt>=12:
+        return dt-12
+    else:
+        raise ValueError("what happened????")
 
-        if dt in int2packstring:
-            byte_string+=struct.pack(int2packstring[dt], value_list[i])
-        #look for text
-        elif dt==12:
-            len_text = len(value_list[i])
-            dtypes[i] = dt+len_text
-            byte_string += value_list[i].encode('ascii')
+def val_dtype_to_byte(val, dt):
+    """given a value and a single-digit dtype rep, covert to binary string"""
+    if val == None: #NULL
+        return b''
+    if dt==1: #one byte int
+        return val.to_bytes(1, byteorder=sys.byteorder, signed=True)
+    if dt==8: #one byte year relative to 2000
+        return (val-2000).to_bytes(1, byteorder=sys.byteorder, signed=True)
+    if dt in [2,3,4,5,6,9,10,11]: #alldtypes i can convert with struct object
+        return struct.pack(int_to_fstring(dt), val)
+    elif dt>=12:  #look for text
+        return val.encode('ascii')
 
-    return dtypes, value_list, byte_string
 
 
-def create_cell_table(schema, value_list, is_interior, left_child_page=None,  rowid=None):
+def dtype_byte_to_val(dt, byte_str):
+    """Given the single-digit dtype encoding and byte string of approp size, returns Python value"""
+    if dt==0:  #null type
+        return None
+    elif dt==1: #onebyteint
+        return int.from_bytes(byte_str, byteorder=sys.byteorder, signed=False)
+    elif dt==8: #one byte year
+        return int.from_bytes(byte_str, byteorder=sys.byteorder, signed=False)+2000
+    elif dt in [2,3,4,5,6,9,10,11]: #alldtypes i can convert with struct object
+        return struct.unpack(int_to_fstring(dt), byte_str)[0]
+        i+=element_size
+    elif dt>=12:  #text
+        return byte_str.decode("utf-8")
+    else:
+         raise ValueError("dtype_byte_to_val????")
+
+
+def table_values_to_payload(schema, value_list):
+    """given a list of database string formatted datatypes ['int'] and an assoc
+    list of values with NULL=None
+
+    returns a bytestring of all elements in value_list and a single-digit repr of the data types"""
+    dtypes = schema_to_int(schema, value_list)
+    byte_string = b''
+    for val, dt in zip(value_list, dtypes):
+        byte_val = val_dtype_to_byte(val, dt)
+
+        byte_string += byte_val
+    return byte_string, dtypes
+
+
+def table_payload_to_values(payload):
+    """
+    Takes the entire bitstring payload and outputs the values in a list (None=Null)
+    """
+    num_columns = payload[0]
+    temp = payload[1:]
+    dtypes =  temp[:num_columns]
+    temp = temp[num_columns:]
+
+    i = 0
+    values = []
+    for dt in dtypes:
+        element_size = get_dt_size(dt)
+        byte_str = temp[i:i+element_size]
+        values.append(dtype_byte_to_val(dt, byte_str))
+        i+=element_size
+
+    assert(i==len(temp))
+    return values
+
+def index_dtype_value_rowids_to_payload(index_dtype, index_value, rowid_list):
+    """
+    given list of database string dtype reps ['int'] single value of index, and list of integers
+
+    returns the bytestring payload for an index cell
+    """
+    dt = schema_to_int([index_dtype], [index_value])
+    bin_num_assoc_rowids = bytes([len(rowid_list)])
+    bin_indx_dtype = bytes(dt)
+    bin_index_val = val_dtype_to_byte(index_value, *dt)
+    bin_rowids = struct.pack(endian+str(len(rowid_list))+'i', *rowid_list)
+    payload = bin_num_assoc_rowids + bin_indx_dtype + bin_index_val+bin_rowids
+    return payload
+
+def index_payload_to_values(payload):
+    """import bytestring payload from index cell outputs the index value and list of rowids"""
+    assoc_row_ids = payload[0]
+    indx_dtype = payload[1]
+
+    element_size = get_dt_size(indx_dtype)
+    indx_byte_str = payload[2:2+element_size]
+    indx_value = dtype_byte_to_val(indx_dtype, indx_byte_str)
+
+    bin_rowid_list  = payload[2+element_size:]
+
+    i=0
+    j = len(bin_rowid_list)
+    rowid_values = []
+    print(j)
+    while(i<j):
+        rowid_values.append(struct.unpack(endian+'i', bin_rowid_list[i:i+4])[0])
+        i+=4
+
+    return indx_value, rowid_values
+
+
+def table_create_cell(schema, value_list, is_interior, left_child_page=None,  rowid=None):
+    """
+    Used to create a cell (binary string representation) that can be inserted into the tbl file
+
+    Parameters:
+    schema (list of strings):  ex. ['int', 'date', 'year']
+    value_list (list of python values):  ex. [10, '2016-03-23_00:00:00','2004']
+    is_interior (bool):  is the cell igoing into an interior or leaf page
+    left_child_page (int):  page_no of left child (only if cell is in interior page).
+    rowid (int):  rowid of the current cell (only if the cell is going in a leaf page)
+
+
+    Returns:
+    cell (byte-string): ex. b'\x00\x00\x00\x00\x00\x00\x00\x00'
+
+    """
     assert(type(schema)==list)
     assert(type(value_list)==list)
     assert(type(is_interior)==bool)
-    is_leaf = not is_interior
-
-    dtypes, value_list, byte_string = vals_to_bytes(schema, value_list)
-    payload = bytes([len(dtypes)])+bytes(dtypes)+byte_string
 
     if  is_interior:
         assert(left_child_page != None)
         assert(rowid != None)
-        cell_header = struct.pack(endian+'ii', left_child_page, rowid)
-    elif is_leaf:
+        cell = struct.pack(endian+'ii', left_child_page, rowid)
+
+    else:
         assert(rowid != None)
-        cell_header = struct.pack(endian+'hi', len(payload), rowid)
-    else:
-         raise ValueError("Error in cell creation")
-    return cell_header + payload
+        payload_body, dtypes  = table_values_to_payload(schema, value_list)
+        payload_header = bytes([len(dtypes)]) + bytes(dtypes)
+        cell_payload = payload_header + payload_body
 
-def body_tovalues(cell, num_columns):
-    int2packstring={
-    0:'x',
-    2:'h',
-    3:'i',
-    4:'q',
-    5:'f',
-    6:'d',
-    8:'b',
-    9:'i',
-    10:'Q',
-    11:'Q'
-    }
-    dtypes = [i for i in cell[:num_columns]]
-    cell = cell[num_columns:]
-    values = []
 
-    i = 0
-    for dt in dtypes:
-        #check for nulls
-        if dt==0:
-            values.append(None)
-            i+=1
+        cell_header = struct.pack(endian+'hi', len(cell_payload), rowid)
 
-        if dt==1:
-            byte_string += value_list[i].from_bytes(1, byteorder=sys.byteorder, signed=True)
-            i+=1
+        cell = cell_header + cell_payload
 
-        if dt in int2packstring:
-            byte_string+=struct.pack(int2packstring[dt], value_list[i])
-        #look for text
-        elif dt==12:
-            len_text = len(value_list[i])
-            dtypes[i] = dt+len_text
-            byte_string += value_list[i].encode('ascii')
-    return format_string
+    return cell
 
-def read_cell(cell, is_table, is_interior):
-    is_leaf = not is_interior
-    is_index = not is_table
 
-    if  is_table and is_interior:
-        cell_header = struct.unpack(endian+'ii', cell[0:8])
-        temp =cell[8:]
-    elif is_table and is_leaf:
-        cell_header = struct.unpack(endian+'hi', cell[0:6])
-        temp = cell[6:]
-    elif is_index and is_interior:
-        cell_header = struct.unpack(endian+'ih', cell[0:6])
-        temp = cell[6:]
-    elif is_index and is_leaf:
-        cell_header = struct.unpack(endian+'h', cell[0:2])
-        temp = cell[2:]
-    else:
-        print("error in read cell")
+def index_create_cell(index_dtype, index_value, rowid_list, is_interior, left_child_page=None):
+    """
+    Used to create a cell (binary string representation) that can be inserted into the ndx file
 
-    if is_table:
-        num_columns = temp[0]
-        temp = temp[1:]
-        f_string = table_cell_intarray_to_formatstring(temp, num_columns)
-        temp = temp[num_columns:]
-        print(f_string)
-        print(len(temp))
-        print(temp[0:-24])
-        cell_body = struct.iter_unpack(endian+f_string, temp)
-    return cell_header, cell_body
-    
+    Parameters:
+    index_dtype (string): ex"long"
+    index_value (val):  ex' 1037843
+    rowid_list (list of ints):  [100,22,3214]
+    is_interior (bool):
+    left_child_page (int):  only if cell is for interior cell
 
-def create_cell_index(schema, value_list, is_table, is_interior, left_child_page=None, bytes_in_payload=None, rowid=None):
-    assert(type(is_table)==bool)
+
+    Returns:
+    cell (byte-string): ex. b'\x00\x00\x00\x00\x00\x00\x00\x00'
+
+    """
     assert(type(is_interior)==bool)
     is_leaf = not is_interior
-    is_index = not is_table
 
-
-    if is_index and is_interior:
+    payload = index_dtype_value_rowids_to_payload(index_dtype, index_value, rowid_list)
+    if is_interior:
         assert(left_child_page != None)
-        assert(rowid != None)
-        cell_header = struct.pack(endian+'ih', left_child_page, bytes_in_payload)
-
-    elif is_index and is_leaf:
-        assert(bytes_in_payload != None)
-        cell_header = struct.pack(endian+'h', bytes_in_payload)
+        cell_header = struct.pack(endian+'IH', left_child_page, len(payload))
+    elif is_leaf:
+        cell_header = struct.pack(endian+'H', len(payload))
     else:
          raise ValueError("Page must be either table")
 
-    if is_table:
-        payload = bytes([len(schema)])+[i for i in schema]+struct.pack('', datavalues))
+    cell = cell_header + payload
+    return cell
+
+
+def table_read_cell(cell, is_interior):
+    """
+    Used to read the contents of a cell (byte string)
+
+    Parameters:
+    cell (byte-string): ex b'\x00\x00\x00\x00\x00\x00\x00\x00'
+    is_interior (bool):
+
+
+    Returns:
+    values (dictionary): ex.
+    interior-> {'left_child_rowid': 1, 'rowid': 10, 'cell_size': 8}
+    leaf ->{'bytes_in_payload': 61,'num_columns': 10,
+            'data': [2, 2, 12,10,10, 1.2999999523162842, None,2020, None,10, 10,'hist'],
+            'cell_size': 67}
+
+    """
+    is_leaf = not is_interior
+
+    if  is_interior:
+        cell_header = struct.unpack(endian+'ii', cell[0:8])
+        res = {'left_child_rowid':cell_header[0],'rowid':cell_header[1]}
+    elif is_leaf:
+        cell_header = struct.unpack(endian+'hi', cell[0:6])
+        payload = cell[6:]
+        values = table_payload_to_values(payload)
+        res = {'bytes_in_payload':cell_header[0], 'num_columns':cell_header[1],"data":values}
     else:
-        payload = bytes([num_assoc_rowids, indx_dtype]+[i for i in column_dtypes]+struct.pack('', indx_values, rowids))
+        print("error in read cell")
+    res["cell_size"]=len(cell)
+    return res
 
-    return cell_header + payload
+
+def index_read_cell(cell, is_interior):
+    """
+    Used to read the contents of a cell (byte string)
+
+    Parameters:
+    cell (byte-string): ex b'\x00\x00\x00\x00\x00\x00\x00\x00'
+    is_interior (bool):
 
 
-def update_page_header(table_name, is_table, page_no, cell_size, insert=True):
-    return
+    Returns:
+    values (dictionary):
+    interior -> {'lchild': 12,'index_value': 1000,'assoc_rowids': [1, 2, 3, 4],'cell_size': 32}
+    leaf-> {'index_value': 1000, 'assoc_rowids': [1, 2, 3, 4], 'cell_size': 28}
 
+    """
+    result=dict()
+    if  is_interior:
+        cell_header = struct.unpack(endian+'ih', cell[0:6])
+        result["lchild"]=cell_header[0]
+        payload = cell[6:]
+    else:
+        cell_header = struct.unpack(endian+'h', cell[0:2])
+        payload = cell[2:]
+
+    indx_value, rowid_list = index_payload_to_values(payload)
+    result["index_value"]=indx_value
+    result["assoc_rowids"]=rowid_list
+    result["cell_size"]=len(cell)
+    return result
 
 #########################################################################################
 
