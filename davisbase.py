@@ -382,28 +382,56 @@ def index_read_cell(cell, is_interior):
     result["cell_size"]=len(cell)
     return result
 
+
+def load_page(file_name, page_num):
+    file_offset = page_num*PAGE_SIZE
+    with open(file_name, 'rb') as f:
+        f.seek(file_offset)
+        page = f.read(PAGE_SIZE)
+    return page
+
+def save_page(file_name, page_num, new_page_data):
+    assert(len(new_page_data)==PAGE_SIZE)
+    file_offset = page_num*PAGE_SIZE
+    with open(file_name, 'wb') as f:
+        f.seek(file_offset)
+        page = f.write(new_page_data)
+    return None
+
+
+def page_available_bytes(file_name, page_num):
+    page = load_page(file_name, page_num)
+    num_cells = struct.unpack(endian+'h', page[2:4])[0]
+    bytes_from_top = 16+(2*num_cells)
+    bytes_from_bot =struct.unpack(endian+'h', page[4:6])[0]
+    return  bytes_from_bot - bytes_from_top
+
+def page_insert_cell(file_name, page_num, cell):
+    page = load_page(file_name, page_num)
+    assert(len(cell)<page_available_bytes(file_name, page_num))
+
+    num_cells = struct.unpack(endian+'h', page[2:4])[0]
+    bytes_from_top = 16+(2*num_cells)
+    bytes_from_bot =struct.unpack(endian+'h', page[4:6])[0]
+
+    new_start_index = bytes_from_bot - len(cell)
+    new_page_data = bytearray(page)
+    #insert cell data
+    new_page_data[new_start_index:bytes_from_bot] = cell
+    #add to 2byte cell array
+    new_page_data[bytes_from_top:bytes_from_top+2] = struct.pack(endian+'h', new_start_index)
+    #update start of cell content
+    new_page_data[4:6] = struct.pack(endian+'h', new_start_index)
+    #update num_cells
+    new_page_data[2:4] = struct.pack(endian+'h', num_cells+1)
+
+    save_page(file_name, page_num, new_page_data)
+    assert(len(new_page_data)==PAGE_SIZE)
+    return new_page_data
+
 #########################################################################################
 
-def insert_cell_table(table_name, page_num, schema, values):
-    assert(type(table)==bool)
-    assert(type(interior)==bool)
-    leaf = not interior
-    index = not table
 
-    file_offset = page_number * PAGE_SIZE
-    with open(table_name+'.tbl', 'wb') as f:
-
-        f.seek(0, file_offset)
-        indx_to_write = unknown_function()
-        cell = create_cell(schema, value_list)
-        cell_size = len(cell)
-        f.seek(0, indx_to_write-cell_size) #make sure to check not overwriting array of locs.
-
-        f.write(cell)
-
-        #update the array in the header
-
-    return
 
 def insert_cell_index(table_name, page_num, schema, values):
     return
