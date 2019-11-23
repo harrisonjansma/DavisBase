@@ -1,6 +1,8 @@
 import os
 import struct
 import sys
+from datetime import datetime, time
+
 
 ############################################################################
 
@@ -58,11 +60,11 @@ def initialize_file(table_name, is_table):
         file_type = '.ndx'
 
     if os.path.exists(table_name+file_type):
-        print("Table {} already exists.".format(table_name))
-    else:
-        with open(table_name+file_type, 'w+') as f:
-            pass
-    write_new_page(table_name, is_table, False, 0, 4294967295)
+        os.remove(table_name+file_type)
+
+    with open(table_name+file_type, 'w+') as f:
+        pass
+    write_new_page(table_name, is_table, False, 0, -1)
     return None
 
 
@@ -85,7 +87,7 @@ def write_new_page(table_name, is_table, is_interior, rsibling_rchild, parent):
 
     with open(table_name + file_type, 'wb') as f:
         f.seek(2,0) #seek end of file
-        f.write(struct.pack('x'*PAGE_SIZE)) #write PAGE_SIZE placeholder bytes
+        f.write(struct.pack(str(PAGE_SIZE-2)+'x')) #write PAGE_SIZE placeholder bytes
         #Header
         f.seek(0, file_size)
         #first byte says what kind of page it is
@@ -100,9 +102,7 @@ def write_new_page(table_name, is_table, is_interior, rsibling_rchild, parent):
         else:
              raise ValueError("Page must be table/index")
         f.write(b'\x00') #unused
-        f.write(struct.pack(endian+'hhiixx', 0, PAGE_SIZE-1, rsibling_rchild, parent))
-
-
+        f.write(struct.pack(endian+'hhii2x', 0, PAGE_SIZE, rsibling_rchild, parent))
 
 def dtype_to_int(dtype):
     """based on the documentation, each dtype has a single-digit integer encoding"""
@@ -146,6 +146,28 @@ def get_dt_size(dt):
     else:
         raise ValueError("what happened????")
 
+
+def date_to_bytes(date, time=False):
+    if not time:
+        return struct.pack(">q", int(round(date.timestamp() * 1000)))
+    else:
+        return struct.pack(">i", int(round(date.timestamp() * 1000)))
+
+def bytes_to_dates(bt, time=False):
+    if not time:
+        return datetime.fromtimestamp((struct.unpack(">q", bt)[0])/1000)
+    else:
+        return datetime.fromtimestamp((struct.unpack(">i", bt)[0])/1000)
+
+def time_to_byte(t):
+    d =  datetime(1970,1,2,t.hour,t.minute, t.microsecond)
+    print(d)
+    return date_to_bytes(d, time=True)
+
+def byte_to_time(bt):
+    return bytes_to_dates(bt, time=True).time()
+
+
 def val_dtype_to_byte(val, dt):
     """given a value and a single-digit dtype rep, covert to binary string"""
     if val == None: #NULL
@@ -154,8 +176,12 @@ def val_dtype_to_byte(val, dt):
         return val.to_bytes(1, byteorder=sys.byteorder, signed=True)
     if dt==8: #one byte year relative to 2000
         return (val-2000).to_bytes(1, byteorder=sys.byteorder, signed=True)
-    if dt in [2,3,4,5,6,9,10,11]: #alldtypes i can convert with struct object
+    if dt in [2,3,4,5,6]: #alldtypes i can convert with struct object
         return struct.pack(int_to_fstring(dt), val)
+    if dt in [10,11]: #datetime, date objects
+        return date_to_bytes(val)
+    if dt==9: #time object
+        return time_to_byte(val)
     elif dt>=12:  #look for text
         return val.encode('ascii')
 
@@ -169,9 +195,12 @@ def dtype_byte_to_val(dt, byte_str):
         return int.from_bytes(byte_str, byteorder=sys.byteorder, signed=False)
     elif dt==8: #one byte year
         return int.from_bytes(byte_str, byteorder=sys.byteorder, signed=False)+2000
-    elif dt in [2,3,4,5,6,9,10,11]: #alldtypes i can convert with struct object
+    elif dt in [2,3,4,5,6]: #alldtypes i can convert with struct object
         return struct.unpack(int_to_fstring(dt), byte_str)[0]
-        i+=element_size
+    if dt in [10,11]: #datetime, dateobjects
+        return bytes_to_dates(byte_str)
+    if dt==9:#time
+        return byte_to_time(byte_str)
     elif dt>=12:  #text
         return byte_str.decode("utf-8")
     else:
@@ -382,7 +411,6 @@ def index_read_cell(cell, is_interior):
     result["cell_size"]=len(cell)
     return result
 
-
 def load_page(file_name, page_num):
     file_offset = page_num*PAGE_SIZE
     with open(file_name, 'rb') as f:
@@ -413,6 +441,30 @@ def page_insert_cell(file_name, page_num, cell):
     num_cells = struct.unpack(endian+'h', page[2:4])[0]
     bytes_from_top = 16+(2*num_cells)
     bytes_from_bot =struct.unpack(endian+'h', page[4:6])[0]
+
+    new_start_index = bytes_from_bot - len(cell)
+    new_page_data = bytearray(page)
+    #insert cell data
+    new_page_data[new_start_index:bytes_from_bot] = cell
+    #add to 2byte cell array
+    new_page_data[bytes_from_top:bytes_from_top+2] = struct.pack(endian+'h', new_start_index)
+    #update start of cell content
+    new_page_data[4:6] = struct.pack(endian+'h', new_start_index)
+    #update num_cells
+    new_page_data[2:4] = struct.pack(endian+'h', num_cells+1)
+
+    save_page(file_name, page_num, new_page_data)
+    assert(len(new_page_data)==PAGE_SIZE)
+    return new_page_data
+
+def page_delete_cell(file_name, page_num, cell):
+    page = load_page(file_name, page_num)
+    num_cells = struct.unpack(endian+'h', page[2:4])[0]
+    bytes_from_top = 16+(2*num_cells)
+    bytes_from_bot =struct.unpack(endian+'h', page[4:6])[0]
+
+    #check if deletion empties the cell completely
+    assert(len(cell)>(PAGE_SIZE-bytes_from_bot))
 
     new_start_index = bytes_from_bot - len(cell)
     new_page_data = bytearray(page)
