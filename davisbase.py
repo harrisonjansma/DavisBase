@@ -283,7 +283,7 @@ def table_create_cell(schema, value_list, is_interior, left_child_page=None,  ro
 
     Parameters:
     schema (list of strings):  ex. ['int', 'date', 'year']
-    value_list (list of python values):  ex. [10, '2016-03-23_00:00:00','2004']
+    value_list (list of python values):  ex. [10, '2016-03-23_00:00:00',2004]
     is_interior (bool):  is the cell igoing into an interior or leaf page
     left_child_page (int):  page_no of left child (only if cell is in interior page).
     rowid (int):  rowid of the current cell (only if the cell is going in a leaf page)
@@ -432,17 +432,17 @@ def load_page(file_name, page_num):
 
 
 def save_page(file_name, page_num, new_page_data):
-        """
-        Saves the overwrites the page in the file (at loc- page_num) with a byte-string of length PAGE_SIZE
+    """
+    Saves the overwrites the page in the file (at loc- page_num) with a byte-string of length PAGE_SIZE
 
-        Parameters:
-        file_name (string): ex 'taco.tbl'
-        page_num (int): 1
-        new_page_data(bytestring): b'\r\x00\x07\x00\n\x01\x00\x00\x00\x00\xff\xff\xff\xff\x00\x00\xe0\x01\xc0\x01\xa4\x01\x80\x01\\\x013\x01\n\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+    Parameters:
+    file_name (string): ex 'taco.tbl'
+    page_num (int): 1
+    new_page_data(bytestring): b'\r\x00\x07\x00\n\x01\x00\x00\x00\x00\xff\xff\xff\xff\x00\x00\xe0\x01\xc0\x01\xa4\x01\x80\x01\\\x013\x01\n\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
 
-        Returns:
-        None
-        """
+    Returns:
+    None
+    """
     assert(len(new_page_data)==PAGE_SIZE)
     file_offset = page_num*PAGE_SIZE
     with open(file_name, 'wb') as f:
@@ -460,17 +460,17 @@ def page_available_bytes(file_name, page_num):
 
 
 def page_insert_cell(file_name, page_num, cell):
-        """
-        Inserts a bytestring into a page from a table or index file. Updates the page header. Fails if page-full
+    """
+    Inserts a bytestring into a page from a table or index file. Updates the page header. Fails if page-full
 
-        Parameters:
-        file_name (string): ex 'taco.tbl'
-        page_num (int): 1
-        cell (byte-string): ex b'\x00\x00\x00\x00\x00\x00\x00\x00'
+    Parameters:
+    file_name (string): ex 'taco.tbl'
+    page_num (int): 1
+    cell (byte-string): ex b'\x00\x00\x00\x00\x00\x00\x00\x00'
 
-        Returns:
-        None
-        """
+    Returns:
+    None
+    """
     page = load_page(file_name, page_num)
     assert(len(cell)<page_available_bytes(file_name, page_num)) #CHECK IF PAGE FULL
     num_cells = struct.unpack(endian+'h', page[2:4])[0]
@@ -491,18 +491,18 @@ def page_insert_cell(file_name, page_num, cell):
     return None
 
 def page_delete_cell(file_name, page_num, cell_indx):
-        """
-        Inserts a bytestring into a page from a table or index file. Updates the page header. Fails index given is out of bounds (2, when there is only one cell in page)
-        Fails if page is empty (no cells). RETURNS IS_EMPTY FLAG
+    """
+    Inserts a bytestring into a page from a table or index file. Updates the page header. Fails index given is out of bounds (2, when there is only one cell in page)
+    Fails if page is empty (no cells). RETURNS IS_EMPTY FLAG
 
-        Parameters:
-        file_name (string): ex 'taco.tbl'
-        page_num (int): 1
-        cell (byte-string): ex b'\x00\x00\x00\x00\x00\x00\x00\x00'
+    Parameters:
+    file_name (string): ex 'taco.tbl'
+    page_num (int): 1
+    cell (byte-string): ex b'\x00\x00\x00\x00\x00\x00\x00\x00'
 
-        Returns:
-        is_empty (bool): False
-        """
+    Returns:
+    is_empty (bool): False
+    """
     prev_page = load_page(file_name, page_num)
     num_cells = struct.unpack(endian+'h', page[2:4])[0]
     assert(cell_indx<=num_cells-1)#index starts at 0
@@ -807,6 +807,27 @@ def delete_all_table_data(table_name):
     bool: success_flag
     """
     return False
+
+
+def catalog_add_table(dictionary, rowid):
+    """
+    dictionary = {
+    'table_name':{
+        "column1":{
+            'data_type':"int",
+            'ordinal_position':1,
+            'is_nullable':'YES',
+            }
+        }
+    }
+    """
+    table = list(dictionary.keys())
+    assert(len(table)==1)
+    table_name = table[0]
+
+
+    davisbase_tables_schema = ['text']
+    davisbase_columns_schema = ['text', 'text', 'text', 'int', 'text']
 
 
 
