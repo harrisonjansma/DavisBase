@@ -840,6 +840,9 @@ def create_index(command):
 ############################################################################
 #DML FUNCTIONS
 
+############################################################################
+#DML FUNCTIONS
+
 def insert_into(command):
     '''
     Assuming values are being set along the correct order of columns
@@ -908,6 +911,8 @@ def query(command: str):
         print(where_clause,"\t",tablename,"\t",columns)
     else:
         print("Enter correct query")
+
+
 
 #############################################################################
 PAGE_SIZE = 512
