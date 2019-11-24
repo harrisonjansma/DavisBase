@@ -1,8 +1,9 @@
 import os
 import struct
 import sys
+import re
+import sqlparse
 from datetime import datetime, time
-
 
 ############################################################################
 
@@ -855,7 +856,7 @@ def insert_into(command):
         values = re.sub("\s", "", re.split(';',re.sub("(?i)values","",values))[0])
         print(values,"\t",table_name)
     else:
-        print("Enter correct query")     
+        print("Enter correct query")
 
 def delete_from(command):
     print("delete from \'{}\'".format(command))
