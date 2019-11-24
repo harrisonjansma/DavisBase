@@ -563,54 +563,20 @@ def create_index(command):
 #DML FUNCTIONS
 
 def insert_into(command):
-    '''
-    Assuming values are being set along the correct order of columns
-    '''
     print("Insert into \'{}\'".format(command))
-    query_match = "insert into\s+(.*?)\s*((?i)values\s(.*?)\s*)?;"
-    if re.match(query_match, command):
-        stmt = sqlparse.parse(command)[0]
-        
-        table_name = str(stmt.tokens[4])
-        values = str(stmt.tokens[-2])
-        values = re.sub("\s", "", re.split(';',re.sub("(?i)values","",values))[0])
-        print(values,"\t",table_name)
-    else:
-        print("Enter correct query")     
+    return None
 
 def delete_from(command):
     print("delete from \'{}\'".format(command))
-    ## check if the update statement is correct or not
-    query_match = "delete\s+(.*?)\s*(?i)from\s+(.*?)\s*((?i)where\s(.*?)\s*)?;"
-    if re.match(query_match, command):
-        stmt = sqlparse.parse(command)[0]
-        where_clause = str(stmt.tokens[-1])
-        where_clause = re.sub("\s", "", re.split(';',re.sub("(?i)where","",where_clause))[0])
-        where_clause = re.split('=|>|<|>=|<=|\s',where_clause)
-        tablename = str(stmt.tokens[-3]).split(",")
-        print(where_clause,"\t",tablename)
-    else:
-        print("Enter correct query")
-
+    return None
 
 def update(command):
     print("update \'{}\'".format(command))
-    ## check if the update statement is correct or not
-    query_match = "(?i)update\s+(.*?)\s*(?i)set\s+(.*?)\s*((?i)where\s(.*?)\s*)?;"
-    if re.match(query_match, command):
-        stmt = sqlparse.parse(command)[0]
-        where_clause = str(stmt.tokens[-1])
-        where_clause = re.sub("\s", "", re.split(';',re.sub("(?i)where","",where_clause))[0])
-        where_clause = re.split('=|>|<|>=|<=|\s',where_clause)
-        set_col = itemgetter(*[0,-1])(re.split('=|\s',str(stmt.tokens[-3])))
-        tablename = str(stmt.tokens[2])
-        print(where_clause,"\t", tablename,"\t",set_col)
-        ## perform select logic
-    else:
-        print("Enter correct query")
+    return None
 
 ##########################################################################
 #DQL FUNCTIONS
+
 
 def query(command: str):
     '''
@@ -619,19 +585,16 @@ def query(command: str):
     '''
     print("User wants to query {}".format(command))
     ## check if the select statement is correct or not
-    query_match = "select\s+(.*?)\s*(?i)from\s+(.*?)\s*((?i)where\s(.*?)\s*)?;"
+    query_match = "select\s+(.*?)\s*from\s+(.*?)\s*(where\s(.*?)\s*)?;"
     if re.match(query_match, command):
         stmt = sqlparse.parse(command)[0]
         where_clause = str(stmt.tokens[-1])
-        where_clause = re.sub("\s", "", re.split(';',re.sub("(?i)where","",where_clause))[0])
-        where_clause = re.split('=|>|<|>=|<=|\s',where_clause)
-        print(where_clause)
+        where_clause = re.split('= | > | < | >= | <=',re.sub("where","",where_clause))
         tablename = str(stmt.tokens[-3]).split(",")
         columns = str(stmt.tokens[2]).split(",")
         print(where_clause,"\t",tablename,"\t",columns)
     else:
         print("Enter correct query")
-#     displayTabular(resultSet)
 
 #############################################################################
 PAGE_SIZE = 512
