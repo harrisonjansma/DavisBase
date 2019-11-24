@@ -1,6 +1,8 @@
 import os
 import struct
 import sys
+import re
+import sqlparse
 
 ############################################################################
 
@@ -575,11 +577,24 @@ def update(command):
 ##########################################################################
 #DQL FUNCTIONS
 
-def query(command):
+
+def query(command: str):
+    '''
+    command : Select statement eg. select a.a,b.b,c from a,b where a.a = b.a;
+    return : None
+    '''
     print("User wants to query {}".format(command))
-    return None
-
-
+    ## check if the select statement is correct or not
+    query_match = "select\s+(.*?)\s*from\s+(.*?)\s*(where\s(.*?)\s*)?;"
+    if re.match(query_match, command):
+        stmt = sqlparse.parse(command)[0]
+        where_clause = str(stmt.tokens[-1])
+        where_clause = re.split('= | > | < | >= | <=',re.sub("where","",where_clause))
+        tablename = str(stmt.tokens[-3]).split(",")
+        columns = str(stmt.tokens[2]).split(",")
+        print(where_clause,"\t",tablename,"\t",columns)
+    else:
+        print("Enter correct query")
 
 #############################################################################
 PAGE_SIZE = 512
