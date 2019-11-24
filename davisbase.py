@@ -411,18 +411,42 @@ def index_read_cell(cell, is_interior):
     result["cell_size"]=len(cell)
     return result
 
+
 def load_page(file_name, page_num):
+    """
+    loads the page of from the table/index file PAGE NUMBER STARTS AT ZERO, will only load one pa
+
+    Parameters:
+    file_name (string): ex 'taco.tbl'
+    page_num (int): 1
+
+    Returns:
+    page (bytestring):
+
+    """
     file_offset = page_num*PAGE_SIZE
     with open(file_name, 'rb') as f:
-        f.seek(file_offset)
+        f.seek(0, file_offset)
         page = f.read(PAGE_SIZE)
     return page
 
+
 def save_page(file_name, page_num, new_page_data):
+        """
+        Saves the overwrites the page in the file (at loc- page_num) with a byte-string of length PAGE_SIZE
+
+        Parameters:
+        file_name (string): ex 'taco.tbl'
+        page_num (int): 1
+        new_page_data(bytestring): b'\r\x00\x07\x00\n\x01\x00\x00\x00\x00\xff\xff\xff\xff\x00\x00\xe0\x01\xc0\x01\xa4\x01\x80\x01\\\x013\x01\n\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+
+        Returns:
+        None
+        """
     assert(len(new_page_data)==PAGE_SIZE)
     file_offset = page_num*PAGE_SIZE
     with open(file_name, 'wb') as f:
-        f.seek(file_offset)
+        f.seek(0, file_offset)
         page = f.write(new_page_data)
     return None
 
@@ -431,17 +455,27 @@ def page_available_bytes(file_name, page_num):
     page = load_page(file_name, page_num)
     num_cells = struct.unpack(endian+'h', page[2:4])[0]
     bytes_from_top = 16+(2*num_cells)
-    bytes_from_bot =struct.unpack(endian+'h', page[4:6])[0]
-    return  bytes_from_bot - bytes_from_top
+    cell_content_start =struct.unpack(endian+'h', page[4:6])[0]
+    return  cell_content_start - bytes_from_top
+
 
 def page_insert_cell(file_name, page_num, cell):
-    page = load_page(file_name, page_num)
-    assert(len(cell)<page_available_bytes(file_name, page_num))
+        """
+        Inserts a bytestring into a page from a table or index file. Updates the page header. Fails if page-full
 
+        Parameters:
+        file_name (string): ex 'taco.tbl'
+        page_num (int): 1
+        cell (byte-string): ex b'\x00\x00\x00\x00\x00\x00\x00\x00'
+
+        Returns:
+        None
+        """
+    page = load_page(file_name, page_num)
+    assert(len(cell)<page_available_bytes(file_name, page_num)) #CHECK IF PAGE FULL
     num_cells = struct.unpack(endian+'h', page[2:4])[0]
     bytes_from_top = 16+(2*num_cells)
     bytes_from_bot =struct.unpack(endian+'h', page[4:6])[0]
-
     new_start_index = bytes_from_bot - len(cell)
     new_page_data = bytearray(page)
     #insert cell data
@@ -452,34 +486,75 @@ def page_insert_cell(file_name, page_num, cell):
     new_page_data[4:6] = struct.pack(endian+'h', new_start_index)
     #update num_cells
     new_page_data[2:4] = struct.pack(endian+'h', num_cells+1)
-
     save_page(file_name, page_num, new_page_data)
     assert(len(new_page_data)==PAGE_SIZE)
-    return new_page_data
+    return None
 
-def page_delete_cell(file_name, page_num, cell):
-    page = load_page(file_name, page_num)
+def page_delete_cell(file_name, page_num, cell_indx):
+        """
+        Inserts a bytestring into a page from a table or index file. Updates the page header. Fails index given is out of bounds (2, when there is only one cell in page)
+        Fails if page is empty (no cells). RETURNS IS_EMPTY FLAG
+
+        Parameters:
+        file_name (string): ex 'taco.tbl'
+        page_num (int): 1
+        cell (byte-string): ex b'\x00\x00\x00\x00\x00\x00\x00\x00'
+
+        Returns:
+        is_empty (bool): False
+        """
+    prev_page = load_page(file_name, page_num)
     num_cells = struct.unpack(endian+'h', page[2:4])[0]
-    bytes_from_top = 16+(2*num_cells)
-    bytes_from_bot =struct.unpack(endian+'h', page[4:6])[0]
+    assert(cell_indx<=num_cells-1)#index starts at 0
+    assert(num_cells>=1) #delete CAN empty a page
 
-    #check if deletion empties the cell completely
-    assert(len(cell)>(PAGE_SIZE-bytes_from_bot))
+    page = bytearray(prev_page)
+    #if cell is the last cell
+    if (idx==num_cells-1) & (idx!=0):
+        cell_content_area_start = struct.unpack(endian+'h', page[4:6])[0]
+        cell_bot_idx = struct.unpack(endian+'h',page[16+2*(idx-1):16+2*(idx)])[0]
+        cell_2_delete = page[cell_content_area_start:cell_bot_idx]
+        dis2replace= len(cell_2_delete)
 
-    new_start_index = bytes_from_bot - len(cell)
-    new_page_data = bytearray(page)
-    #insert cell data
-    new_page_data[new_start_index:bytes_from_bot] = cell
-    #add to 2byte cell array
-    new_page_data[bytes_from_top:bytes_from_top+2] = struct.pack(endian+'h', new_start_index)
-    #update start of cell content
-    new_page_data[4:6] = struct.pack(endian+'h', new_start_index)
-    #update num_cells
-    new_page_data[2:4] = struct.pack(endian+'h', num_cells+1)
+        #overwrite the cell2delete
+        page[cell_content_area_start:cell_bot_idx]=b'\x00'*dis2replace
+        #change the cell_start area
+        page[4:6] = struct.pack(endian+'h', cell_content_area_start+dis2replace)
+        #shift the array of cell locs back
+        page[16+2*(num_cells-1):16+2*(num_cells)]=b'\x00'*2
+        #update the number of cells
+        page[2:4] = struct.pack(endian+'h', num_cells-1)
 
-    save_page(file_name, page_num, new_page_data)
-    assert(len(new_page_data)==PAGE_SIZE)
-    return new_page_data
+    else:
+        cell_content_area_start = struct.unpack(endian+'h', page[4:6])[0]
+        cell_top_idx = struct.unpack(endian+'h',page[16+2*idx:16+2*(idx+1)])[0]
+        if idx==0: #if cell is first on the page (bottom)
+            cell_bot_idx = PAGE_SIZE
+        else:
+            cell_bot_idx = struct.unpack(endian+'h',page[16+2*(idx-1):16+2*(idx)])[0]
+
+        cell_2_delete = page[cell_top_idx:cell_bot_idx]
+        dis2replace= len(cell_2_delete)
+        new_content_cell_area = cell_content_area_start+dis2replace
+
+        copy= page[cell_content_area_start:cell_top_idx]
+        #shift the cell content down, over deleted cell
+        page[new_content_cell_area:cell_bot_idx] = copy
+        #replace the redundant info
+        page[cell_content_area_start:new_content_cell_area]=b'\x00'*dis2replace
+        #change the cell_start area
+        page[4:6] = struct.pack(endian+'h', new_content_cell_area)
+        #shift the array of cell locs back
+        copy = page[16+2*(idx+1):16+2*(num_cells)]
+        page[16+2*(idx):16+2*(num_cells-1)] = copy
+        page[16+2*(num_cells-1):16+2*(num_cells)]=b'\x00'*2
+        #update num of cells
+        page[2:4] = struct.pack(endian+'h', num_cells-1)
+        #get loc fo cell_array[idx] and cell_array[idx-1]
+
+    save_page(file_name, page_num, page)
+    assert(len(new_page_data)==PAGE_SIZE) #ensure page is same size
+    return (num_cells - 1) == 0
 
 #########################################################################################
 
