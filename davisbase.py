@@ -412,42 +412,6 @@ def index_read_cell(cell, is_interior):
     return result
 
 
-def load_file(file_name):
-    """
-    loads the table/index file returns the bytestring for the entire file (reduce number of read/writes)
-
-    Parameters:
-    file (byte-string): ex 'taco.tbl'
-    page_num (int): 1
-
-    Returns:
-    page (bytestring):
-
-    """
-    with open(file_name, 'rb') as f:
-        return f.read()
-
-
-def load_page(file_name, page_num):
-    """
-    loads the page of from the table/index file PAGE NUMBER STARTS AT ZERO, will only load one pa
-
-    Parameters:
-    file_name (string): ex 'taco.tbl'
-    page_num (int): 1
-
-    Returns:
-    page (bytestring):
-
-    """
-    file_offset = page_num*PAGE_SIZE
-    with open(file_name, 'rb') as f:
-        f.seek(0, file_offset)
-        page = f.read(PAGE_SIZE)
-    return page
-
-
-
 
 
 def save_page(file_name, page_num, new_page_data):
@@ -470,8 +434,8 @@ def save_page(file_name, page_num, new_page_data):
     return None
 
 
-def page_available_bytes(file_name, page_num):
-    page = load_page(file_name, page_num)
+def page_available_bytes(file_bytes, page_num):
+    page = load_page(file_bytes, page_num)
     num_cells = struct.unpack(endian+'h', page[2:4])[0]
     bytes_from_top = 16+(2*num_cells)
     cell_content_start =struct.unpack(endian+'h', page[4:6])[0]
@@ -492,7 +456,9 @@ def page_insert_cell(file_name, page_num, cell):
     Returns:
     None
     """
-    page = load_page(file_name, page_num)
+    file_bytes = load_file(file_name)
+    page = load_page(file_bytes, page_num)
+
     assert(len(cell)<page_available_bytes(file_name, page_num)) #CHECK IF PAGE FULL
     num_cells = struct.unpack(endian+'h', page[2:4])[0]
     bytes_from_top = 16+(2*num_cells)
@@ -568,7 +534,8 @@ def page_delete_cell(file_name, page_num, cell_indx):
     Returns:
     is_empty (bool): False
     """
-    temp_page = load_page(file_name, page_num)
+    file_bytes = load_file(file_name)
+    page = load_page(file_bytes, page_num)
     page = bytearray(temp_page)
     num_cells = struct.unpack(endian+'h', page[2:4])[0]
     assert(cell_indx<=num_cells-1)#index starts at 0
@@ -639,7 +606,8 @@ def page_update_cell(file_name, page_num, cell_indx, cell):
     Returns:
     None
     """
-    temp_page = load_page(file_name, page_num)
+    file_bytes = load_file(file_name)
+    page = load_page(file_bytes, page_num)
     page = bytearray(temp_page)
 
     num_cells = struct.unpack(endian+'h', page[2:4])[0]
@@ -699,8 +667,86 @@ def split_page():
 def merge_pages():
     return None
 
-def read_cells_in_page():
-    return None
+
+
+def load_file(file_name):
+    """loads the table/index file returns the bytestring for the entire file (reduce number of read/writes)
+
+    Parameters:
+    file (byte-string): ex 'taco.tbl'
+    page_num (int): 1
+
+    Returns:
+    page (bytestring):
+    """
+    with open(file_name, 'rb') as f:
+        return f.read()
+
+
+def load_page(file_bytes, page_num):
+    """
+    loads the page of from the table/index PAGE NUMBER STARTS AT ZERO, will only load one pa
+    Parameters:
+    file_name (string): ex 'taco.tbl'
+    page_num (int): 1
+    Returns:
+    page (bytestring):
+    """
+    file_offset = page_num*PAGE_SIZE
+    return file_bytes[file_offset:(page_num+1)*PAGE_SIZE]
+
+
+
+
+def read_cells_in_page(file_bytes, page_num, is_table):
+    """read all the data from a page, get the file_bytes object with load_file(file_name)"""
+    assert(page_num<(len(file_bytes)/PAGE_SIZE))
+    page = load_page(file_bytes, page_num)
+    num_cells = struct.unpack(endian+'h', page[2:4])[0]
+    available_bytes = page_available_bytes(file_bytes, page_num)
+
+    if page[0] in [2,5]:
+        is_interior = True
+    else:
+        is_interior = False
+
+    i=1
+    while i<=num_cells:
+        cell_top_loc = struct.unpack(endian+'h',page[16+2*(i-1):16+2*(i)])[0]
+        cell_bot_loc = struct.unpack(endian+'h',page[16+2*i:16+2*(i+1)])[0]
+        cell = page[cell_top_loc:cell_bot_loc]
+        if is_table:
+            data = table_read_cell(cell, is_interior)
+        else:
+            data = index_read_cell(cell, is_interior)
+
+    result = {
+    "page_number":page_num,
+    "is_table": is_table,
+    "is_leaf": not is_interior,
+    "num_cells":num_cells,
+    "available_bytes":available_bytes,
+    "data":data
+    }
+    return result
+
+
+def read_all_pages_in_file(file_name):
+    if file_name[-3:]=='tbl':
+        is_table==True
+    else:
+        is_table = False
+
+    file = load_file(file_name)
+    file_size = len(file)
+    assert(file_size%PAGE_SIZE==0)
+    num_pages = file_size/PAGE_SIZE
+    data = []
+    for page_num in range(num_pages):
+        data.append(read_cells_in_page(file, page_num, is_table))
+    return data
+
+
 
 def find_value_page():
     return None
