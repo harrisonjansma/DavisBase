@@ -744,7 +744,30 @@ def create_table(command):
 
 
 
-def parse_create_table(command):
+def extract_definitions(token_list):
+    '''
+    Subordinate function for create table to get column names and their definitions
+    '''
+    
+    # assumes that token_list is a parenthesis
+    definitions = []
+    tmp = []
+    # grab the first token, ignoring whitespace. idx=1 to skip open (
+    tidx, token = token_list.token_next(1)
+    while token and not token.match(sqlparse.tokens.Punctuation, ')'):
+        tmp.append(token)
+        # grab the next token, this times including whitespace
+        tidx, token = token_list.token_next(tidx, skip_ws=False)
+        # split on ",", except when on end of statement
+        if token and token.match(sqlparse.tokens.Punctuation, ','):
+            definitions.append(tmp)
+            tmp = []
+            tidx, token = token_list.token_next(tidx)
+    if tmp and isinstance(tmp[0], sqlparse.sql.Identifier):
+        definitions.append(tmp)
+    return definitions
+
+def parse_create_table(SQL):
     """
     Parses the raw, lower-cased input from the CLI controller. Will identify table name,
     column names, data types, and constraints. Will also check for syntax errors.
@@ -758,13 +781,40 @@ def parse_create_table(command):
             );""  )
 
     Returns:
-    tuple: (table_name, column_list)
+    tuple: (table_name, column_list, definition_list)
 
     table_name: str
     column_list: list of column objects.
+    
+    SQL = \"""CREATE TABLE foo (
+         id integer primary key,
+         title varchar(200) not null,
+         description text);\"""
     """
-    return None
-
+    
+    if re.match("(?i)create (?i)table [a-zA-Z]+\s\(\s?\n?", SQL):
+        if SQL.endswith(');'):
+            print("Valid statement")
+    else:
+        print("Invalid statement")
+        
+    parsed = sqlparse.parse(SQL)[0]
+    table_name = str(parsed[4])
+    _, par = parsed.token_next_by(i=sqlparse.sql.Parenthesis)
+    columns = extract_definitions(par)
+    col_list = []
+    definition_list = []
+    for column in columns:
+        definitions = ''.join(str(t) for t in column).split(',')
+        for definition in definitions:
+            d = ' '.join(str(t) for t in definition.split())
+            print('NAME: {name} DEFINITION: {definition}'.format(name=definition.split()[0],
+                                                                 definition=d))
+            col_list.append(definition.split()[0])
+            definition_list.append(d)
+    
+    ## table name and two lists columns and definitions 
+    return (table_name,col_list, definition_list)
 
 
 
@@ -787,7 +837,15 @@ def parse_drop_table(command):
 
     Returns:
     """
-    return "table_name"
+    ## check if the drop statement is correct or not
+    ## statement must compulsarily end with semicolon
+    query_match = "(?i)DROP\s+(.*?)\s*(?i)TABLE\s+[a-zA-Z]+\;"
+    if re.match(query_match, command):
+        stmt = sqlparse.parse(command)[0]
+        tablename = str(stmt.tokens[-2])
+    else:
+        print("Enter correct query")
+    return tablename
 
 def check_table_exists(table_name):
     """
