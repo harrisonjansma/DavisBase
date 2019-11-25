@@ -229,7 +229,8 @@ def table_payload_to_values(payload):
     temp = payload[1:]
     dtypes =  temp[:num_columns]
     temp = temp[num_columns:]
-
+    print(num_columns)
+    print(dtypes)
     i = 0
     values = []
     for dt in dtypes:
@@ -237,7 +238,9 @@ def table_payload_to_values(payload):
         byte_str = temp[i:i+element_size]
         values.append(dtype_byte_to_val(dt, byte_str))
         i+=element_size
-
+    print(element_size)
+    print(temp)
+    print(i)
     assert(i==len(temp))
     return values
 
@@ -288,11 +291,11 @@ def table_create_cell(schema, value_list, is_interior, left_child_page=None,  ro
     left_child_page (int):  page_no of left child (only if cell is in interior page).
     rowid (int):  rowid of the current cell (only if the cell is going in a leaf page)
 
-
     Returns:
     cell (byte-string): ex. b'\x00\x00\x00\x00\x00\x00\x00\x00'
 
     """
+    assert(len(value_list)==len(schema))
     assert(type(schema)==list)
     assert(type(value_list)==list)
     assert(type(is_interior)==bool)
@@ -314,7 +317,6 @@ def table_create_cell(schema, value_list, is_interior, left_child_page=None,  ro
         cell = cell_header + cell_payload
 
     return cell
-
 
 def index_create_cell(index_dtype, index_value, rowid_list, is_interior, left_child_page=None):
     """
@@ -374,7 +376,7 @@ def table_read_cell(cell, is_interior):
         cell_header = struct.unpack(endian+'hi', cell[0:6])
         payload = cell[6:]
         values = table_payload_to_values(payload)
-        res = {'bytes_in_payload':cell_header[0], 'num_columns':cell_header[1],"data":values}
+        res = {'bytes':cell_header[0]+6, 'rowid':cell_header[1],"data":values}
     else:
         print("error in read cell")
     res["cell_size"]=len(cell)
@@ -459,7 +461,7 @@ def page_insert_cell(file_name, page_num, cell):
     file_bytes = load_file(file_name)
     page = load_page(file_bytes, page_num)
 
-    assert(len(cell)<page_available_bytes(file_name, page_num)) #CHECK IF PAGE FULL
+    assert(len(cell)<page_available_bytes(file_bytes, page_num)) #CHECK IF PAGE FULL
     num_cells = struct.unpack(endian+'h', page[2:4])[0]
     bytes_from_top = 16+(2*num_cells)
     bytes_from_bot =struct.unpack(endian+'h', page[4:6])[0]
@@ -476,8 +478,6 @@ def page_insert_cell(file_name, page_num, cell):
     save_page(file_name, page_num, new_page_data)
     assert(len(new_page_data)==PAGE_SIZE)
     return None
-
-
 
 def shift_page_content(page, top_indx, bot_indx, shift_step, up=True):
     assert(bot_indx+shift_step<=PAGE_SIZE)
@@ -501,6 +501,7 @@ def shift_page_content(page, top_indx, bot_indx, shift_step, up=True):
 
 
 def update_array_values(page, first_array_loc_to_change, num_cells, shift_step, up=True):
+    """When we shift the page content for cells, the pointers in the page header become incorrect."""
     if shift_step==0:
         return page
     if up:
@@ -695,13 +696,11 @@ def load_page(file_bytes, page_num):
     file_offset = page_num*PAGE_SIZE
     return file_bytes[file_offset:(page_num+1)*PAGE_SIZE]
 
-
-
-
 def read_cells_in_page(file_bytes, page_num, is_table):
     """read all the data from a page, get the file_bytes object with load_file(file_name)"""
     assert(page_num<(len(file_bytes)/PAGE_SIZE))
     page = load_page(file_bytes, page_num)
+
     num_cells = struct.unpack(endian+'h', page[2:4])[0]
     available_bytes = page_available_bytes(file_bytes, page_num)
 
@@ -709,16 +708,22 @@ def read_cells_in_page(file_bytes, page_num, is_table):
         is_interior = True
     else:
         is_interior = False
-
-    i=1
-    while i<=num_cells:
-        cell_top_loc = struct.unpack(endian+'h',page[16+2*(i-1):16+2*(i)])[0]
-        cell_bot_loc = struct.unpack(endian+'h',page[16+2*i:16+2*(i+1)])[0]
-        cell = page[cell_top_loc:cell_bot_loc]
-        if is_table:
-            data = table_read_cell(cell, is_interior)
+    i=0
+    data = []
+    while i<=num_cells-1:
+        if i == 0:
+            cell_bot_loc = PAGE_SIZE
         else:
-            data = index_read_cell(cell, is_interior)
+            cell_bot_loc = struct.unpack(endian+'h',page[16+2*(i-1):16+2*(i)])[0]
+        cell_top_loc = struct.unpack(endian+'h',page[16+2*i:16+2*(i+1)])[0]
+
+        cell = page[cell_top_loc:cell_bot_loc]
+
+        if is_table:
+            data.append(table_read_cell(cell, is_interior))
+        else:
+            data.append(index_read_cell(cell, is_interior))
+        i+=1
 
     result = {
     "page_number":page_num,
@@ -726,27 +731,34 @@ def read_cells_in_page(file_bytes, page_num, is_table):
     "is_leaf": not is_interior,
     "num_cells":num_cells,
     "available_bytes":available_bytes,
-    "data":data
+    "cells":data
     }
     return result
 
-
 def read_all_pages_in_file(file_name):
+    """
+    Given the file name, loads all data from every page. This is what we will use during inserts updates, deletes
+
+    Parameters:
+    file_name (string): ex"davisbase_tables.tbl"
+
+    Returns:
+    pages (dict of dicts): ex. b'\x00\x00\x00\x00\x00\x00\x00\x00'
+
+    """
     if file_name[-3:]=='tbl':
-        is_table==True
+        is_table=True
     else:
         is_table = False
 
     file = load_file(file_name)
     file_size = len(file)
     assert(file_size%PAGE_SIZE==0)
-    num_pages = file_size/PAGE_SIZE
+    num_pages = int(file_size/PAGE_SIZE)
     data = []
     for page_num in range(num_pages):
         data.append(read_cells_in_page(file, page_num, is_table))
     return data
-
-
 
 def find_value_page():
     return None
@@ -897,16 +909,56 @@ class Catalog:
 #########################################################################
 #CLI FUNCTIONS
 
-def init():
-    if os.path.exists('davisbase_tables.tbl'):
-        pass
-    else:
-        initialize_file('davisbase_tables', True)
 
+
+
+
+
+def init():
     if os.path.exists('davisbase_columns.tbl'):
         pass
     else:
         initialize_file('davisbase_columns', True)
+        file_name = "davisbase_columns.tbl"
+        davisbase_columns_schema = ['TEXT', 'TEXT', 'TEXT', 'TINYINT', 'TEXT']
+
+        cells = [["davisbase_tables", "rowid", "INT", 1, "NO" ],
+                ["davisbase_tables", "table_name", "TEXT", 2, "NO" ],
+                 ["davisbase_columns", "rowid", "INT", 1, "NO" ],
+                ["davisbase_columns", "table_name", "TEXT", 2, "NO" ],
+                ["davisbase_columns", "column_name", "TEXT", 3, "NO" ],
+                ["davisbase_columns", "data_type", "TEXT", 4, "NO" ],
+                ["davisbase_columns", "ordinal_position", "TINYINT", 5, "NO" ],
+                ["davisbase_columns", "is_nullable", "TEXT", 6, "NO" ]]
+
+        for i, cell in enumerate(cells):
+            cell = table_create_cell(davisbase_columns_schema, cell, False, left_child_page=None,  rowid=i+1)
+            try:
+                page_insert_cell(file_name, 0, cell)
+            except:
+                print("cell_size:",len(cell))
+                file_bytes = load_file(file_name)
+                print("Remaining space in page:", page_available_bytes(file_bytes, 0))
+
+
+    if os.path.exists('davisbase_tables.tbl'):
+        pass
+    else:
+        initialize_file('davisbase_tables', True)
+        file_name = "davisbase_tables.tbl"
+        davisbase_tables_schema = ['TEXT']
+
+        cells = [["davisbase_tables"],
+                ["davisbase_columns"]]
+
+        for i, cell in enumerate(cells):
+            cell = table_create_cell(davisbase_tables_schema, cell, False, left_child_page=None,  rowid=i+1)
+            try:
+                page_insert_cell(file_name, 0, cell)
+            except:
+                print("cell_size:",len(cell))
+                file_bytes = load_file(file_name)
+                print("Remaining space in page:", page_available_bytes(file_bytes, 0))
 
 def help():
     print("DavisBase supported commands.")
