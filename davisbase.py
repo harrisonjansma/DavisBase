@@ -412,6 +412,22 @@ def index_read_cell(cell, is_interior):
     return result
 
 
+def load_file(file_name):
+    """
+    loads the table/index file returns the bytestring for the entire file (reduce number of read/writes)
+
+    Parameters:
+    file (byte-string): ex 'taco.tbl'
+    page_num (int): 1
+
+    Returns:
+    page (bytestring):
+
+    """
+    with open(file_name, 'rb') as f:
+        return f.read()
+
+
 def load_page(file_name, page_num):
     """
     loads the page of from the table/index file PAGE NUMBER STARTS AT ZERO, will only load one pa
@@ -429,6 +445,9 @@ def load_page(file_name, page_num):
         f.seek(0, file_offset)
         page = f.read(PAGE_SIZE)
     return page
+
+
+
 
 
 def save_page(file_name, page_num, new_page_data):
@@ -457,6 +476,8 @@ def page_available_bytes(file_name, page_num):
     bytes_from_top = 16+(2*num_cells)
     cell_content_start =struct.unpack(endian+'h', page[4:6])[0]
     return  cell_content_start - bytes_from_top
+
+
 
 
 def page_insert_cell(file_name, page_num, cell):
@@ -490,10 +511,54 @@ def page_insert_cell(file_name, page_num, cell):
     assert(len(new_page_data)==PAGE_SIZE)
     return None
 
+
+
+def shift_page_content(page, top_indx, bot_indx, shift_step, up=True):
+    assert(bot_indx+shift_step<=PAGE_SIZE)
+    assert(top_indx-shift_step>=0)
+    if shift_step==0:
+        return page
+
+    copy = page[top_indx:bot_indx]
+    if up:
+        new_top_indx = top_indx - shift_step
+        new_bot_indx = bot_indx - shift_step
+        page[new_top_indx:new_bot_indx]=copy
+        page[new_bot_indx:bot_indx]=b'\x00'*shift_step
+        return page
+    else:
+        new_top_indx = top_indx + shift_step
+        new_bot_indx = bot_indx + shift_step
+        page[new_top_indx:new_bot_indx]=copy
+        page[top_indx:new_top_indx]=b'\x00'*shift_step
+        return page
+
+
+def update_array_values(page, first_array_loc_to_change, num_cells, shift_step, up=True):
+    if shift_step==0:
+        return page
+    if up:
+        for i in range(first_array_loc_to_change, num_cells):
+            arr_top = 16+2*i
+            arr_bot = 16+2*(i+1)
+            prev_val = struct.unpack(endian+'h',page[arr_top:arr_bot])[0]
+            page[arr_top:arr_bot]=struct.pack(endian+'h', prev_val-shift_step)
+    else:
+        for i in range(first_array_loc_to_change, num_cells):
+            arr_top = 16+2*i
+            arr_bot = 16+2*(i+1)
+            prev_val = struct.unpack(endian+'h',page[arr_top:arr_bot])[0]
+            page[arr_top:arr_bot]=struct.pack(endian+'h', prev_val+shift_step)
+    return page
+
+
+
+
+
 def page_delete_cell(file_name, page_num, cell_indx):
     """
-    Inserts a bytestring into a page from a table or index file. Updates the page header. Fails index given is out of bounds (2, when there is only one cell in page)
-    Fails if page is empty (no cells). RETURNS IS_EMPTY FLAG
+    Deletes a bytestring into a page from a table or index file. Updates the page header. Fails index given is out of bounds (2, when there is only one cell in page)
+    Fails if page is empty (no cells). RETURNS IS_EMPTY FLAG (empty after deletion)
 
     Parameters:
     file_name (string): ex 'taco.tbl'
@@ -503,58 +568,145 @@ def page_delete_cell(file_name, page_num, cell_indx):
     Returns:
     is_empty (bool): False
     """
-    prev_page = load_page(file_name, page_num)
+    temp_page = load_page(file_name, page_num)
+    page = bytearray(temp_page)
     num_cells = struct.unpack(endian+'h', page[2:4])[0]
     assert(cell_indx<=num_cells-1)#index starts at 0
     assert(num_cells>=1) #delete CAN empty a page
+    assert(cell_indx>=0)
 
-    page = bytearray(prev_page)
-    #if cell is the last cell
+    cell_content_area_start = struct.unpack(endian+'h', page[4:6])[0]
+    end_of_array = 16+2*num_cells
+    array_idx_top = 16+2*idx
+    array_idx_bot = 16+2*(idx+1)
+
+    #if cell is the last cell (but not if theres only one cell left)
     if (idx==num_cells-1) & (idx!=0):
-        cell_content_area_start = struct.unpack(endian+'h', page[4:6])[0]
-        cell_bot_idx = struct.unpack(endian+'h',page[16+2*(idx-1):16+2*(idx)])[0]
-        cell_2_delete = page[cell_content_area_start:cell_bot_idx]
-        dis2replace= len(cell_2_delete)
+        cell_top_loc = cell_content_area_start
+        cell_bot_loc = struct.unpack(endian+'h',page[16+2*(idx-1):16+2*(idx)])[0]
 
+        cell_2_delete = page[cell_content_area_start:cell_bot_loc]
+        dis2replace= len(cell_2_delete)
         #overwrite the cell2delete
-        page[cell_content_area_start:cell_bot_idx]=b'\x00'*dis2replace
-        #change the cell_start area
+        page[cell_top_loc:cell_bot_loc]=b'\x00'*dis2replace
+        #change the cell_start area in header
         page[4:6] = struct.pack(endian+'h', cell_content_area_start+dis2replace)
-        #shift the array of cell locs back
+        #delete last entri in cell array
         page[16+2*(num_cells-1):16+2*(num_cells)]=b'\x00'*2
         #update the number of cells
         page[2:4] = struct.pack(endian+'h', num_cells-1)
 
     else:
-        cell_content_area_start = struct.unpack(endian+'h', page[4:6])[0]
-        cell_top_idx = struct.unpack(endian+'h',page[16+2*idx:16+2*(idx+1)])[0]
+        cell_top_loc = struct.unpack(endian+'h',page[array_idx_top:array_idx_bot])[0]
         if idx==0: #if cell is first on the page (bottom)
-            cell_bot_idx = PAGE_SIZE
+            cell_bot_loc = PAGE_SIZE
         else:
-            cell_bot_idx = struct.unpack(endian+'h',page[16+2*(idx-1):16+2*(idx)])[0]
+            cell_bot_loc = struct.unpack(endian+'h',page[array_idx_top-2:array_idx_top])[0]
 
-        cell_2_delete = page[cell_top_idx:cell_bot_idx]
+        cell_2_delete = page[cell_top_loc:cell_bot_loc]
         dis2replace= len(cell_2_delete)
-        new_content_cell_area = cell_content_area_start+dis2replace
-
-        copy= page[cell_content_area_start:cell_top_idx]
-        #shift the cell content down, over deleted cell
-        page[new_content_cell_area:cell_bot_idx] = copy
-        #replace the redundant info
-        page[cell_content_area_start:new_content_cell_area]=b'\x00'*dis2replace
+        #shift cell content down
+        page = shift_page_content(page, cell_content_area_start, cell_top_loc, dis2replace, up=False)
+        #since we just shifted every cell, every value in cell_array is off
+        page = update_array_values(page, cell_indx, num_cells, dis2replace, up=False)
         #change the cell_start area
-        page[4:6] = struct.pack(endian+'h', new_content_cell_area)
-        #shift the array of cell locs back
-        copy = page[16+2*(idx+1):16+2*(num_cells)]
-        page[16+2*(idx):16+2*(num_cells-1)] = copy
-        page[16+2*(num_cells-1):16+2*(num_cells)]=b'\x00'*2
+        page[4:6] = struct.pack(endian+'h', cell_content_area_start+dis2replace)
+        #shift cell array up (deletes entry for deleted cell)
+        page = shift_page_content(page, array_idx_bot, end_of_array, 2, up=True)
         #update num of cells
         page[2:4] = struct.pack(endian+'h', num_cells-1)
-        #get loc fo cell_array[idx] and cell_array[idx-1]
 
     save_page(file_name, page_num, page)
     assert(len(new_page_data)==PAGE_SIZE) #ensure page is same size
     return (num_cells - 1) == 0
+
+
+
+
+def page_update_cell(file_name, page_num, cell_indx, cell):
+    """
+    updates a bytestring into a page from a table or index file. Updates the page header. Fails index given is out of bounds (2, when there is only one cell in page)
+    Fails if page is empty (no cells). RETURNS IS_EMPTY FLAG
+
+    Need to think about that happens when an upate cell causes the page to be full
+
+    Parameters:
+    file_name (string): ex 'taco.tbl'
+    page_num (int): 1
+    cell_indx (int): 0
+    cell (byte-string): ex b'\x00\x00\x00\x00\x00\x00\x00\x00'
+
+    Returns:
+    None
+    """
+    temp_page = load_page(file_name, page_num)
+    page = bytearray(temp_page)
+
+    num_cells = struct.unpack(endian+'h', page[2:4])[0]
+    assert(cell_indx<=num_cells-1)#index starts at 0
+    assert(num_cells!=0) #delete CAN empty a page
+    assert(cell_indx>=0)
+
+    cell_content_area_start = struct.unpack(endian+'h', page[4:6])[0]
+    end_of_array = 16+2*num_cells
+    array_idx_top = 16+2*idx
+    array_idx_bot = 16+2*(idx+1)
+    available_bytes = page_available_bytes(file_name, page_num)
+    cell_top_idx = struct.unpack(endian+'h',page[16+2*idx:16+2*(idx+1)])[0]
+    if idx==0: #if cell is first on the page (bottom)
+        cell_bot_idx = PAGE_SIZE
+    else:
+        cell_bot_idx = struct.unpack(endian+'h',page[16+2*(idx-1):16+2*(idx)])[0]
+
+
+    cell_2_update = page[cell_top_idx:cell_bot_idx]
+    if len(cell_2_update)==len(cell):
+        page[cell_top_idx:cell_bot_idx] = cell
+
+    elif len(cell_2_update)<len(cell): #need to shift cell_content up
+        dis2move =  len(cell) - len(cell_2_update)
+        assert(dis2move<=available_bytes)   #NEED TO SPLIT
+
+        page = shift_page_content(page, cell_content_area_start, cell_top_idx, dis2move, up=True)
+        #since we just shifted every cell, every value in cell_array is off
+        page = update_array_values(page, idx, num_cells, dis2move, up=True)
+        #change cell content area start
+        page[4:6] = struct.pack(endian+'h', cell_content_area_start-dis2move)
+
+        #insert updated cell
+        page[cell_top_idx-dis2move:cell_bot_idx] = cell
+
+
+
+    else: #need to shift cell_content up
+        dis2move =  len(cell_2_update) - len(cell)
+        page = shift_page_content(page, cell_content_area_start, cell_top_idx, dis2move, up=False)
+        #since we just shifted every cell, every value in cell_array is off
+        page = update_array_values(page, idx, num_cells, dis2move, up=True)
+        #change cell content area start
+        page[4:6] = struct.pack(endian+'h', cell_content_area_start+dis2move)
+
+        page[cell_top_idx+dis2move:cell_bot_idx] = cell
+
+    save_page(file_name, page_num, page)
+    assert(len(new_page_data)==PAGE_SIZE) #ensure page is same size
+    return None
+
+
+def split_page():
+    return None
+
+def merge_pages():
+    return None
+
+def read_cells_in_page():
+    return None
+
+def find_value_page():
+    return None
+
+
+
 
 #########################################################################################
 
@@ -748,7 +900,7 @@ def extract_definitions(token_list):
     '''
     Subordinate function for create table to get column names and their definitions
     '''
-    
+
     # assumes that token_list is a parenthesis
     definitions = []
     tmp = []
@@ -785,19 +937,19 @@ def parse_create_table(SQL):
 
     table_name: str
     column_list: list of column objects.
-    
+
     SQL = \"""CREATE TABLE foo (
          id integer primary key,
          title varchar(200) not null,
          description text);\"""
     """
-    
+
     if re.match("(?i)create (?i)table [a-zA-Z]+\s\(\s?\n?", SQL):
         if SQL.endswith(');'):
             print("Valid statement")
     else:
         print("Invalid statement")
-        
+
     parsed = sqlparse.parse(SQL)[0]
     table_name = str(parsed[4])
     _, par = parsed.token_next_by(i=sqlparse.sql.Parenthesis)
@@ -812,8 +964,8 @@ def parse_create_table(SQL):
                                                                  definition=d))
             col_list.append(definition.split()[0])
             definition_list.append(d)
-    
-    ## table name and two lists columns and definitions 
+
+    ## table name and two lists columns and definitions
     return (table_name,col_list, definition_list)
 
 
@@ -913,7 +1065,7 @@ def insert_into(command):
         values = re.sub("\s", "", re.split(';',re.sub("(?i)values","",values))[0])
         print(values,"\t",table_name)
     else:
-        print("Enter correct query")     
+        print("Enter correct query")
 
 def delete_from(command):
     print("delete from \'{}\'".format(command))
