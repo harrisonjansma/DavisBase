@@ -103,6 +103,7 @@ def write_new_page(table_name, is_table, is_interior, rsibling_rchild, parent):
              raise ValueError("Page must be table/index")
         f.write(b'\x00') #unused
         f.write(struct.pack(endian+'hhii2x', 0, PAGE_SIZE, rsibling_rchild, parent))
+        return file_size/PAGE_SIZE
 
 def dtype_to_int(dtype):
     """based on the documentation, each dtype has a single-digit integer encoding"""
@@ -185,8 +186,6 @@ def val_dtype_to_byte(val, dt):
     elif dt>=12:  #look for text
         return val.encode('ascii')
 
-
-
 def dtype_byte_to_val(dt, byte_str):
     """Given the single-digit dtype encoding and byte string of approp size, returns Python value"""
     if dt==0:  #null type
@@ -206,7 +205,6 @@ def dtype_byte_to_val(dt, byte_str):
     else:
          raise ValueError("dtype_byte_to_val????")
 
-
 def table_values_to_payload(schema, value_list):
     """given a list of database string formatted datatypes ['int'] and an assoc
     list of values with NULL=None
@@ -219,7 +217,6 @@ def table_values_to_payload(schema, value_list):
 
         byte_string += byte_val
     return byte_string, dtypes
-
 
 def table_payload_to_values(payload):
     """
@@ -278,7 +275,6 @@ def index_payload_to_values(payload):
         i+=4
 
     return indx_value, rowid_values
-
 
 def table_create_cell(schema, value_list, is_interior, left_child_page=None,  rowid=None):
     """
@@ -349,7 +345,6 @@ def index_create_cell(index_dtype, index_value, rowid_list, is_interior, left_ch
     cell = cell_header + payload
     return cell
 
-
 def table_read_cell(cell, is_interior):
     """
     Used to read the contents of a cell (byte string)
@@ -371,7 +366,7 @@ def table_read_cell(cell, is_interior):
 
     if  is_interior:
         cell_header = struct.unpack(endian+'ii', cell[0:8])
-        res = {'left_child_rowid':cell_header[0],'rowid':cell_header[1]}
+        res = {'left_child_page':cell_header[0],'rowid':cell_header[1]}
     elif is_leaf:
         cell_header = struct.unpack(endian+'hi', cell[0:6])
         payload = cell[6:]
@@ -381,7 +376,6 @@ def table_read_cell(cell, is_interior):
         print("error in read cell")
     res["cell_size"]=len(cell)
     return res
-
 
 def index_read_cell(cell, is_interior):
     """
@@ -401,10 +395,12 @@ def index_read_cell(cell, is_interior):
     result=dict()
     if  is_interior:
         cell_header = struct.unpack(endian+'ih', cell[0:6])
-        result["lchild"]=cell_header[0]
+        result["left_child_page"]=cell_header[0]
+        result["bytes"]=cell_header[0]+6
         payload = cell[6:]
     else:
         cell_header = struct.unpack(endian+'h', cell[0:2])
+        result["bytes"]=cell_header[0]+6
         payload = cell[2:]
 
     indx_value, rowid_list = index_payload_to_values(payload)
@@ -412,8 +408,6 @@ def index_read_cell(cell, is_interior):
     result["assoc_rowids"]=rowid_list
     result["cell_size"]=len(cell)
     return result
-
-
 
 
 def save_page(file_name, page_num, new_page_data):
@@ -442,8 +436,6 @@ def page_available_bytes(file_bytes, page_num):
     bytes_from_top = 16+(2*num_cells)
     cell_content_start =struct.unpack(endian+'h', page[4:6])[0]
     return  cell_content_start - bytes_from_top
-
-
 
 
 def page_insert_cell(file_name, page_num, cell):
@@ -520,8 +512,6 @@ def update_array_values(page, first_array_loc_to_change, num_cells, shift_step, 
 
 
 
-
-
 def page_delete_cell(file_name, page_num, cell_indx):
     """
     Deletes a bytestring into a page from a table or index file. Updates the page header. Fails index given is out of bounds (2, when there is only one cell in page)
@@ -589,8 +579,6 @@ def page_delete_cell(file_name, page_num, cell_indx):
     return (num_cells - 1) == 0
 
 
-
-
 def page_update_cell(file_name, page_num, cell_indx, cell):
     """
     updates a bytestring into a page from a table or index file. Updates the page header. Fails index given is out of bounds (2, when there is only one cell in page)
@@ -631,7 +619,6 @@ def page_update_cell(file_name, page_num, cell_indx, cell):
     cell_2_update = page[cell_top_idx:cell_bot_idx]
     if len(cell_2_update)==len(cell):
         page[cell_top_idx:cell_bot_idx] = cell
-
     elif len(cell_2_update)<len(cell): #need to shift cell_content up
         dis2move =  len(cell) - len(cell_2_update)
         assert(dis2move<=available_bytes)   #NEED TO SPLIT
@@ -641,11 +628,8 @@ def page_update_cell(file_name, page_num, cell_indx, cell):
         page = update_array_values(page, idx, num_cells, dis2move, up=True)
         #change cell content area start
         page[4:6] = struct.pack(endian+'h', cell_content_area_start-dis2move)
-
         #insert updated cell
         page[cell_top_idx-dis2move:cell_bot_idx] = cell
-
-
 
     else: #need to shift cell_content up
         dis2move =  len(cell_2_update) - len(cell)
@@ -654,7 +638,6 @@ def page_update_cell(file_name, page_num, cell_indx, cell):
         page = update_array_values(page, idx, num_cells, dis2move, up=True)
         #change cell content area start
         page[4:6] = struct.pack(endian+'h', cell_content_area_start+dis2move)
-
         page[cell_top_idx+dis2move:cell_bot_idx] = cell
 
     save_page(file_name, page_num, page)
@@ -662,10 +645,61 @@ def page_update_cell(file_name, page_num, cell_indx, cell):
     return None
 
 
-def split_page():
+
+
+
+def bplus_split_page(file_bytes, page_num):
+    values = read_cells_in_page(file_bytes, page_num)
+
+    is_table = values['is_table']
+    assert(is_table)
+    parent_num = values['page_number']
+    is_interior = not values['is_leaf']
+    num_cells = values['num_cells']
+    cells = values['cells']
+    middle_cell = num_cells//2
+
+    #SORT THE CELLS BY INDEX / ROWID VALUE (JUST IN CASE)
+    if is_interior:
+        rightmost_child_page = values['rightmost_child_page']
+    else:
+        rightmost_sibling_page = values['rightmost_sibling_page']
+
+    if parent_num>10000:
+        #ROOT CONDITION
+        if is_interior:
+            rchild_num = write_new_page(table_name, is_table, is_interior, rsibling_rchild, parent_num)
+            lchild_num = write_new_page(table_name, is_table, is_interior, rchild_num, parent_num)
+        else:
+            rchild_num = write_new_page(table_name, is_table, is_interior, rsibling_rchild, parent_num)
+            lchild_num = write_new_page(table_name, is_table, is_interior, rchild_num, parent_num)
+
+        for i in range(middle_cell):
+            #EXTRACT CELL VALUES (ROWID)
+            cell = table_create_cell(schema, value_list, is_interior, left_child_page=None,  rowid=None)
+            page_insert_cell(file_name, lchild_num, cell)
+
+        for i in range(middle_cell, num_cells):
+            #EXTRACT CELL VALUES (ROWID)
+            cell = table_create_cell(schema, value_list, is_interior, left_child_page=None,  rowid=None)
+            page_insert_cell(file_name, lchild_num, cell)
+    else:
+
+
+
+
+    try:
+        insert(cell into paretn)
+    except:
+        bplus_split_page(parent)
+
     return None
 
-def merge_pages():
+def merge_pages(file_bytes, parent_num, lchild_num, rchild_num):
+
+
+
+
     return None
 
 
@@ -696,18 +730,24 @@ def load_page(file_bytes, page_num):
     file_offset = page_num*PAGE_SIZE
     return file_bytes[file_offset:(page_num+1)*PAGE_SIZE]
 
-def read_cells_in_page(file_bytes, page_num, is_table):
+def read_cells_in_page(file_bytes, page_num):
     """read all the data from a page, get the file_bytes object with load_file(file_name)"""
     assert(page_num<(len(file_bytes)/PAGE_SIZE))
     page = load_page(file_bytes, page_num)
 
     num_cells = struct.unpack(endian+'h', page[2:4])[0]
+    parent_page = struct.unpack(endian+'i', page[10:14])[0]
     available_bytes = page_available_bytes(file_bytes, page_num)
+    if page[0] in [5,13]:
+        is_table = True
+    else:
+        is_table = False
 
     if page[0] in [2,5]:
         is_interior = True
     else:
         is_interior = False
+
     i=0
     data = []
     while i<=num_cells-1:
@@ -727,12 +767,18 @@ def read_cells_in_page(file_bytes, page_num, is_table):
 
     result = {
     "page_number":page_num,
+    "parent_page":parent_page,
     "is_table": is_table,
     "is_leaf": not is_interior,
     "num_cells":num_cells,
     "available_bytes":available_bytes,
     "cells":data
     }
+    if is_interior:
+        result['rightmost_child_page'] = parent_page = struct.unpack(endian+'i', page[6:10])[0]
+    else:
+        result['rightmost_sibling_page'] = parent_page = struct.unpack(endian+'i', page[6:10])[0]
+
     return result
 
 def read_all_pages_in_file(file_name):
@@ -757,7 +803,7 @@ def read_all_pages_in_file(file_name):
     num_pages = int(file_size/PAGE_SIZE)
     data = []
     for page_num in range(num_pages):
-        data.append(read_cells_in_page(file, page_num, is_table))
+        data.append(read_cells_in_page(file, page_num))
     return data
 
 def find_value_page():
