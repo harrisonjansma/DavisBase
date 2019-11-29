@@ -117,7 +117,7 @@ def help():
     print("EXIT;")
     return None
 
-
+"""NEEDS CONNECTING TO PARSER"""
 def create_table(command):
     col_catalog_dictionary = parse_create_table(command)
     table_name = list(col_catalog_dictionary.keys())[0]
@@ -141,6 +141,58 @@ def initialize_file(table_name, is_table):
         pass
     write_new_page(table_name, is_table, False, 0, -1)
     return None
+
+
+def initialize_indexes(column_dictionary):
+    """
+    dictionary = {
+    'table_name':{
+        "column1":{
+            'data_type':"int",
+            'ordinal_position':1,
+            'is_nullable':'YES',
+            'unique':'NO'
+            'primary_key':'YES'
+            }
+        }
+    }
+    """
+    table = list(column_dictionary.keys())
+    table_name = table[0]
+    column_names = list(column_dictionary[table_name].keys())
+    columns = list(column_dictionary[table_name].values())
+
+    for col in column_names:
+        if column_dictionary[table_name][col]['primary_key']=='YES':
+            index_name = table_name+'_'+col
+            initialize_file(table_name, False) #create the empty ndx file for primary key
+    return None
+
+
+def catalog_add_table(column_dictionary):
+    """
+    dictionary = {
+    'table_name':{
+        "column1":{
+            'data_type':"int",
+            'ordinal_position':1,
+            'is_nullable':'YES',
+            'unique':'NO'
+            'primary_key':'YES'
+            }
+        }
+    }
+    """
+    table = list(column_dictionary.keys())
+    assert(len(table)==1)
+    table_name = table[0]
+    columns =  column_dictionary[table_name]
+    column_names = list(column_dictionary[table_name].keys())
+    insert("davisbase_tables", [table_name])
+    for col in column_names:
+        values=[table_name, col, columns[col]['data_type'], columns[col]['ordinal_position'], columns[col]['is_nullable'], columns[col]['unique'], columns[col]['primary_key']]
+        insert("davisbase_columns", values)
+
 
 
 
@@ -871,22 +923,26 @@ def get_next_page_rowid(table_name):
         next_rowid = rowid_sorted_cells[-1]['rowid']
     return final_page['page_number'], next_rowid + 1
 
-def page_cell_indx_given_rowid(table_name, rowid):
+
+def page_cell_indx_given_index_value(file_name, index_value):
     page_num=0
-    pages = read_all_pages_in_file(table_name+'.tbl')
+    pages = read_all_pages_in_file(file_name)
     return get_page_cell_indx(pages, rowid, page_num)
+
 
 def get_page_cell_indx(pages, value, page_num):
     is_table= pages[page_num]['is_table']
     is_leaf = pages[page_num]['is_leaf']
     assert(is_table)
     for cell_indx, cell in enumerate(pages[page_num]['cells']):
-        if (cell['rowid']==value and is_leaf): #got a match
+        if (cell['rowid'] == value and is_leaf): #got a match
             return page_num, cell_indx
-        elif cell['rowid']>value and not is_leaf:
+
+        elif (cell['rowid'] > value and not is_leaf): #same
             page_num = cell['left_child_page']
             return get_page_cell_indx(pages, value, page_num)
-        elif cell['rowid']<=value and not is_leaf:
+
+        elif (cell['rowid']<=value and not is_leaf):
             page_num = pages[page_num]['rightmost_child_page']
             return get_page_cell_indx(pages, value, page_num)
         else:
@@ -1061,60 +1117,12 @@ def get_indexes(table_name):
 
 
 
-def initialize_indexes(column_dictionary):
-    """
-    dictionary = {
-    'table_name':{
-        "column1":{
-            'data_type':"int",
-            'ordinal_position':1,
-            'is_nullable':'YES',
-            'unique':'NO'
-            'primary_key':'YES'
-            }
-        }
-    }
-    """
-    table = list(column_dictionary.keys())
-    table_name = table[0]
-    column_names = list(column_dictionary[table_name].keys())
-    columns = list(column_dictionary[table_name].values())
-
-    for col in column_names:
-        if column_dictionary[table_name][col]['primary_key']=='YES':
-            index_name = table_name+'_'+col
-            initialize_file(table_name, False) #create the empty ndx file for primary key
-    return None
-
-
-def catalog_add_table(column_dictionary):
-    """
-    dictionary = {
-    'table_name':{
-        "column1":{
-            'data_type':"int",
-            'ordinal_position':1,
-            'is_nullable':'YES',
-            'unique':'NO'
-            'primary_key':'YES'
-            }
-        }
-    }
-    """
-    table = list(column_dictionary.keys())
-    assert(len(table)==1)
-    table_name = table[0]
-    columns =  column_dictionary[table_name]
-    column_names = list(column_dictionary[table_name].keys())
-    insert("davisbase_tables", [table_name])
-    for col in column_names:
-        values=[table_name, col, columns[col]['data_type'], columns[col]['ordinal_position'], columns[col]['is_nullable'], columns[col]['unique'], columns[col]['primary_key']]
-        insert("davisbase_columns", values)
-
-
-
 #########################################################################
 # TESTING
+
+
+
+
 
 
 #############################################################################
@@ -1125,6 +1133,47 @@ def catalog_add_table(column_dictionary):
 """
 
 
+def index_where_should_it_go(file_name, index_value):
+    """rowid will not be present, but will key value be present?
+    if kv present -> append rowid to cell
+    if kv not present -> create new cell insert to page
+
+    if finds kv-> if cell has room -> insert
+                ->if no room -> create_cell -> insert in left child"""
+    kv_present = False
+    page_num = 0
+
+
+    return kv_present, page_num, cell_index
+
+
+def page_cell_indx_given_index_value(file_name, index_value):
+    page_num=0
+    pages = read_all_pages_in_file(file_name)
+    return get_page_cell_indx(pages, rowid, page_num)
+
+
+def get_page_cell_indx(pages, value, page_num):
+    is_table= pages[page_num]['is_table']
+    is_leaf = pages[page_num]['is_leaf']
+    assert(is_table)
+    for cell_indx, cell in enumerate(pages[page_num]['cells']):
+        if (cell['rowid'] == value and is_leaf): #got a match
+            return page_num, cell_indx
+
+        elif (cell['rowid'] > value and not is_leaf): #same
+            page_num = cell['left_child_page']
+            return get_page_cell_indx(pages, value, page_num)
+
+        elif (cell['rowid']<=value and not is_leaf):
+            page_num = pages[page_num]['rightmost_child_page']
+            return get_page_cell_indx(pages, value, page_num)
+        else:
+            pass
+    if is_leaf: #No match and is leaf node
+        return page_num, None
+    else:
+        assert(False)
 
 
 def insert(table_name, values):
@@ -1138,21 +1187,37 @@ def insert(table_name, values):
         table_leaf_split_page(table_name+'.tbl', next_page, cell)
 
     for filename in get_indexes(table_name):
+        indexed_colname = filename[len(table_name)+1:-4]
         for col in all_col_data:
-            if col['data'][1]==file_name[len(table_name)+1:-4]:
+            if col['data'][1]==indexed_colname:
                 index_dtype= col['data'][2]
                 index_value= values[col['data'][3]] #index by ord position
-        next_page  = index_get_next_page(index_value)
-        try:
-            index_page_insert_cell(index_dtype, index_value, next_rowid)
-        except:
-            index_leaf_split_page(table_name+'.tbl', next_page, cell)
+
+        page, cell_indx = page_cell_indx_given_index_value(filename, index_value)
+
+        if cell_no is None:
+            cell = index_create_cell()
+            try:
+                index_page_insert_cell(index_dtype, index_value, next_rowid)
+            except:
+                index_leaf_split_page(table_name+'.tbl', next_page, cell)
+        else:
+            add_to_cell(filename, page, cell_indx)
+
     return None
 
 
 
+
+
+
+
+
+
+
+
 def delete(table_name, rowid):
-    page_num, cell_indx = page_cell_indx_given_rowid(table_name, rowid)
+    page_num, cell_indx = page_cell_indx_given_index_value(table_name, rowid)
     if cell_indx is None: #no value found
         return None
     else:
@@ -1314,6 +1379,7 @@ def extract_definitions(token_list):
     if tmp and isinstance(tmp[0], sqlparse.sql.Identifier):
         definitions.append(tmp)
     return definitions
+
 
 def parse_create_table(SQL):
     """
