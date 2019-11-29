@@ -807,14 +807,14 @@ def read_all_pages_in_file(file_name):
     return data
 
 def find_value_page():
+    ## 
+    
     return None
 
 
 
 
 #########################################################################################
-
-
 
 def insert_cell_index(table_name, page_num, schema, values):
     return
@@ -955,12 +955,14 @@ class Catalog:
 #########################################################################
 #CLI FUNCTIONS
 
+def get_columnlist(table):
+
+    
 
 
 
 
-
-def init():
+def __init__():
     if os.path.exists('davisbase_columns.tbl'):
         pass
     else:
@@ -1104,14 +1106,17 @@ def parse_create_table(SQL):
         definitions = ''.join(str(t) for t in column).split(',')
         for definition in definitions:
             d = ' '.join(str(t) for t in definition.split())
-            print('NAME: {name} DEFINITION: {definition}'.format(name=definition.split()[0],
-                                                                 definition=d))
+#             print('NAME: {name} DEFINITION: {definition}'.format(name=definition.split()[0],
+#                                                                  definition=d))
             col_list.append(definition.split()[0])
             definition_list.append(d)
-
-    ## table name and two lists columns and definitions
-    return (table_name,col_list, definition_list)
-
+    
+    d = {}
+    d[table_name] = {}
+    for col, definition in zip(col_list, definition_list):
+        d[table_name][col] = definition
+    
+    return d
 
 
 def drop_table(command):
@@ -1184,14 +1189,10 @@ def catalog_add_table(dictionary, rowid):
     davisbase_columns_schema = ['text', 'text', 'text', 'int', 'text']
 
 
-
-
 def create_index(command):
     print("create index \'{}\'".format(command))
     return None
 
-############################################################################
-#DML FUNCTIONS
 
 ############################################################################
 #DML FUNCTIONS
@@ -1264,7 +1265,6 @@ def query(command: str):
         print(where_clause,"\t",tablename,"\t",columns)
     else:
         print("Enter correct query")
-
 
 
 #############################################################################
