@@ -909,6 +909,7 @@ def read_all_pages_in_file(file_name):
 
 
 
+
 def get_next_page_rowid(table_name):
     pages = read_all_pages_in_file(table_name+'.tbl')
     final_page_num = 0
@@ -922,6 +923,7 @@ def get_next_page_rowid(table_name):
         rowid_sorted_cells = sorted(final_page['cells'], key=lambda x: x['rowid'])
         next_rowid = rowid_sorted_cells[-1]['rowid']
     return final_page['page_number'], next_rowid + 1
+
 
 
 def page_cell_indx_given_index_value(file_name, index_value):
@@ -1120,6 +1122,9 @@ def get_indexes(table_name):
 #########################################################################
 # TESTING
 
+def get_columnlist(table):
+
+    
 
 
 
@@ -1422,14 +1427,17 @@ def parse_create_table(SQL):
         definitions = ''.join(str(t) for t in column).split(',')
         for definition in definitions:
             d = ' '.join(str(t) for t in definition.split())
-            print('NAME: {name} DEFINITION: {definition}'.format(name=definition.split()[0],
-                                                                 definition=d))
+#             print('NAME: {name} DEFINITION: {definition}'.format(name=definition.split()[0],
+#                                                                  definition=d))
             col_list.append(definition.split()[0])
             definition_list.append(d)
-
-    ## table name and two lists columns and definitions
-    return (table_name,col_list, definition_list)
-
+    
+    d = {}
+    d[table_name] = {}
+    for col, definition in zip(col_list, definition_list):
+        d[table_name][col] = definition
+    
+    return d
 
 
 def parse_drop_table(command):
@@ -1463,12 +1471,11 @@ def delete_all_table_data(table_name):
     return False
 
 
+
 def create_index(command):
     print("create index \'{}\'".format(command))
     return None
 
-############################################################################
-#DML FUNCTIONS
 
 ############################################################################
 #DML FUNCTIONS
@@ -1541,7 +1548,6 @@ def query(command: str):
         print(where_clause,"\t",tablename,"\t",columns)
     else:
         print("Enter correct query")
-
 
 
 #############################################################################
