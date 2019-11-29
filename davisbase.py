@@ -50,7 +50,7 @@ def check_input(command):
         print("Command \"{}\" not recognized".format(command))
 
 ####################################################################
-#TABLE FUNCTIONS for Harrison to complete
+# COMPLETED FUNCTIONS
 
 
 
@@ -62,25 +62,25 @@ def init():
     else:
         initialize_file('davisbase_columns', True)
         file_name = "davisbase_columns.tbl"
-        davisbase_columns_schema = ['TEXT', 'TEXT', 'TEXT', 'TINYINT', 'TEXT']
+        davisbase_columns_schema = ['TEXT', 'TEXT', 'TEXT', 'TINYINT', 'TEXT', 'TEXT', 'TEXT']
 
-        cells = [["davisbase_tables", "rowid", "INT", 1, "NO" ],
-                ["davisbase_tables", "table_name", "TEXT", 2, "NO" ],
-                 ["davisbase_columns", "rowid", "INT", 1, "NO" ],
-                ["davisbase_columns", "table_name", "TEXT", 2, "NO" ],
-                ["davisbase_columns", "column_name", "TEXT", 3, "NO" ],
-                ["davisbase_columns", "data_type", "TEXT", 4, "NO" ],
-                ["davisbase_columns", "ordinal_position", "TINYINT", 5, "NO" ],
-                ["davisbase_columns", "is_nullable", "TEXT", 6, "NO" ]]
+        davisbase_columns_cells = [["davisbase_tables", "rowid", "INT", 1, "NO", 'NO', 'NO' ],
+                ["davisbase_tables", "table_name", "TEXT", 2, "NO", 'NO', 'NO' ],
+                 ["davisbase_columns", "rowid", "INT", 1, "NO", 'NO', 'NO' ],
+                ["davisbase_columns", "table_name", "TEXT", 2, "NO", 'NO', 'NO' ],
+                ["davisbase_columns", "column_name", "TEXT", 3, "NO", 'NO', 'NO' ],
+                ["davisbase_columns", "data_type", "TEXT", 4, "NO", 'NO', 'NO' ],
+                ["davisbase_columns", "ordinal_position", "TINYINT", 5, "NO", 'NO', 'NO' ],
+                ["davisbase_columns", "is_nullable", "TEXT", 6, "NO", 'NO', 'NO' ],
+              ["davisbase_columns", "unique", "TEXT", 7, "NO", 'NO', 'NO' ],
+              ["davisbase_columns", "primary_key", "TEXT", 8, "NO", 'NO', 'NO' ]]
 
-        for i, cell in enumerate(cells):
+        for i, cell in enumerate(davisbase_columns_cells):
             cell = table_create_cell(davisbase_columns_schema, cell, False, left_child_page=None,  rowid=i+1)
             try:
                 page_insert_cell(file_name, 0, cell)
             except:
-                print("cell_size:",len(cell))
-                file_bytes = load_file(file_name)
-                print("Remaining space in page:", page_available_bytes(file_bytes, 0))
+                table_leaf_split_page(file_name, 0, cell)
 
 
     if os.path.exists('davisbase_tables.tbl'):
@@ -92,7 +92,6 @@ def init():
 
         cells = [["davisbase_tables"],
                 ["davisbase_columns"]]
-
         for i, cell in enumerate(cells):
             cell = table_create_cell(davisbase_tables_schema, cell, False, left_child_page=None,  rowid=i+1)
             try:
@@ -101,6 +100,8 @@ def init():
                 print("cell_size:",len(cell))
                 file_bytes = load_file(file_name)
                 print("Remaining space in page:", page_available_bytes(file_bytes, 0))
+
+
 
 def help():
     print("DavisBase supported commands.")
@@ -116,6 +117,14 @@ def help():
     print("EXIT;")
     return None
 
+"""NEEDS CONNECTING TO PARSER"""
+def create_table(command):
+    col_catalog_dictionary = parse_create_table(command)
+    table_name = list(col_catalog_dictionary.keys())[0]
+    initialize_file(table_name, True)
+    catalog_add_table(col_catalog_dictionary)
+    initialize_indexes(col_catalog_dictionary)
+    return None
 
 
 def initialize_file(table_name, is_table):
@@ -132,6 +141,58 @@ def initialize_file(table_name, is_table):
         pass
     write_new_page(table_name, is_table, False, 0, -1)
     return None
+
+
+def initialize_indexes(column_dictionary):
+    """
+    dictionary = {
+    'table_name':{
+        "column1":{
+            'data_type':"int",
+            'ordinal_position':1,
+            'is_nullable':'YES',
+            'unique':'NO'
+            'primary_key':'YES'
+            }
+        }
+    }
+    """
+    table = list(column_dictionary.keys())
+    table_name = table[0]
+    column_names = list(column_dictionary[table_name].keys())
+    columns = list(column_dictionary[table_name].values())
+
+    for col in column_names:
+        if column_dictionary[table_name][col]['primary_key']=='YES':
+            index_name = table_name+'_'+col
+            initialize_file(table_name, False) #create the empty ndx file for primary key
+    return None
+
+
+def catalog_add_table(column_dictionary):
+    """
+    dictionary = {
+    'table_name':{
+        "column1":{
+            'data_type':"int",
+            'ordinal_position':1,
+            'is_nullable':'YES',
+            'unique':'NO'
+            'primary_key':'YES'
+            }
+        }
+    }
+    """
+    table = list(column_dictionary.keys())
+    assert(len(table)==1)
+    table_name = table[0]
+    columns =  column_dictionary[table_name]
+    column_names = list(column_dictionary[table_name].keys())
+    insert("davisbase_tables", [table_name])
+    for col in column_names:
+        values=[table_name, col, columns[col]['data_type'], columns[col]['ordinal_position'], columns[col]['is_nullable'], columns[col]['unique'], columns[col]['primary_key']]
+        insert("davisbase_columns", values)
+
 
 
 
@@ -815,7 +876,7 @@ def read_cells_in_page(file_bytes, page_num):
     if is_interior:
         result['rightmost_child_page'] = parent_page = struct.unpack(endian+'i', page[6:10])[0]
     else:
-        result['rightmost_sibling_page'] = parent_page = struct.unpack(endian+'i', page[6:10])[0]
+        result['right_sibling_page'] = parent_page = struct.unpack(endian+'i', page[6:10])[0]
     result['cells']=data
     return result
 
@@ -845,12 +906,57 @@ def read_all_pages_in_file(file_name):
         data.append(read_cells_in_page(file, page_num))
     return data
 
-#########################################################################
-#Testinging
+
+
+
+def get_next_page_rowid(table_name):
+    pages = read_all_pages_in_file(table_name+'.tbl')
+    final_page_num = 0
+    while not pages[final_page_num]['is_leaf']:
+        final_page_num = pages[final_page_num]['rightmost_child_page']
+
+    final_page = pages[final_page_num]
+    if len(pages[0]['cells'])==0:#if there are no records in the table
+        next_rowid=0
+    else:
+        rowid_sorted_cells = sorted(final_page['cells'], key=lambda x: x['rowid'])
+        next_rowid = rowid_sorted_cells[-1]['rowid']
+    return final_page['page_number'], next_rowid + 1
+
+
+def page_cell_indx_given_index_value(file_name, index_value):
+    page_num=0
+    pages = read_all_pages_in_file(file_name)
+    return get_page_cell_indx(pages, rowid, page_num)
+
+
+def get_page_cell_indx(pages, value, page_num):
+    is_table= pages[page_num]['is_table']
+    is_leaf = pages[page_num]['is_leaf']
+    assert(is_table)
+    for cell_indx, cell in enumerate(pages[page_num]['cells']):
+        if (cell['rowid'] == value and is_leaf): #got a match
+            return page_num, cell_indx
+
+        elif (cell['rowid'] > value and not is_leaf): #same
+            page_num = cell['left_child_page']
+            return get_page_cell_indx(pages, value, page_num)
+
+        elif (cell['rowid']<=value and not is_leaf):
+            page_num = pages[page_num]['rightmost_child_page']
+            return get_page_cell_indx(pages, value, page_num)
+        else:
+            pass
+    if is_leaf: #No match and is leaf node
+        return page_num, None
+    else:
+        assert(False)
+
+
 
 def table_interior_split_page(file_name, split_page_num, cell2insert, new_rightmost_page):
-    file_bytes = load_file(file_name)
-    values = read_cells_in_page(file_bytes, split_page_num)
+    pages = read_all_pages_in_file(file_name)
+    values = pages[split_page_num]
 
     table_name = file_name[:-4]
     parent_num = values['parent_page']
@@ -864,52 +970,64 @@ def table_interior_split_page(file_name, split_page_num, cell2insert, new_rightm
     cells = values['cells']
     middle_cell = int((num_cells+1)//2) #have to add one since we havent actually added the cell
     middle_cell_binary = cells[middle_cell]['cell_binary']
+    middle_rowid = cells[middle_cell]['rowid']
 
     rightmost_child_page_right = new_rightmost_page
     rightmost_child_page_left = cells[middle_cell]['left_child_page']
-    if parent_num==-1: #ROOT CONDITION #children will also be intertior nodes
-        rchild_num = write_new_page(table_name, is_table, is_interior, rightmost_child_page_right, split_page_num)
+
+    if parent_num==-1: #ROOT CONDITION #children will also be interior nodes
+        rchild_num = write_new_page(table_name, is_table, is_interior, new_rightmost_page, split_page_num)
         lchild_num = write_new_page(table_name, is_table, is_interior, rightmost_child_page_left, split_page_num)
 
         for i in range(middle_cell): #Copy cells into left child
             cell = cells[i]['cell_binary']
-            update_page_header(file_name, cells[i]['left_child_page'], parent=lchild_num)
+            update_page_header(file_name, cells[i]['left_child_page'], parent=lchild_num) #update child to point header to lchild
             page_insert_cell(file_name, lchild_num, cell)
-        update_page_header(file_name, rightmost_child_page_left, parent=lchild_num)
+        update_page_header(file_name, rightmost_child_page_left, parent=lchild_num)#update parent of rightmost
 
         for i in range(middle_cell+1, num_cells): #Copy cells into right child   #splitting the interior nodes,  the middle cell is not redundant in children
             cell = cells[i]['cell_binary']
             update_page_header(file_name, cells[i]['left_child_page'], parent=rchild_num)
             page_insert_cell(file_name, rchild_num, cell)
         update_page_header(file_name, rightmost_child_page_right, parent=rchild_num)
-        page_insert_cell(file_name, rchild_num, cell2insert)
+        page_insert_cell(file_name, rchild_num, cell2insert) #insert cell2insert to new right child
 
         #Update the pointers in the new, root node, then delete all but middle cell
-        update_cell_lpointer(file_name, split_page_num, middle_cell-1, lchild_num)
+        update_cell_lpointer(file_name, split_page_num, middle_cell, lchild_num)
         update_page_header(file_name, split_page_num, rsibling_rchild=rchild_num)
         j=0
         for i in range(num_cells-1):#deletes all cells except middle
             if i==middle_cell:
                 j=1
             page_delete_cell(file_name, split_page_num, j)
+
+        return rchild_num  #return so we can update headers of pages that couldnt fit in the old page
+
     else:
-        rsibling = write_new_page(table_name, is_table, is_interior, rightmost_child_page_right, parent_num)
-        update_page_header(file_name, split_page_num, rsibling_rchild=rightmost_child_page_left)
-        for i in range(middle_cell, num_cells): #Copy cells into right sibling
+        rsibling = write_new_page(table_name, is_table, is_interior, new_rightmost_page, parent_num)
+
+        for i in range(middle_cell+1, num_cells): #Copy cells into right sibling
             cell = cells[i]['cell_binary']
             update_page_header(file_name, cells[i]['left_child_page'], parent=rsibling)
             page_insert_cell(file_name, rsibling, cell)
+        page_insert_cell(file_name, rsibling, cell2insert) #insert cell2insert to new right child
+
+
+        #delete all the copied cells from left sibling
         j=middle_cell
         for i in range(middle_cell, num_cells):
             page_delete_cell(file_name, split_page_num, j)
+        update_page_header(file_name, split_page_num, rsibling_rchild=rightmost_child_page_left)
 
         middle_cell_binary = table_create_cell([], [], True, left_child_page=split_page_num,  rowid=middle_rowid)
-        update_page_header(file_name, parent_num, rsibling_rchild=rsibling)
+        if pages[parent_num]['rightmost_child_page']==split_page_num:
+            update_page_header(file_name, parent_num, rsibling_rchild=rsibling)
         try:
             page_insert_cell(file_name, parent_num, middle_cell_binary)
         except:
             table_interior_split_page(file_name, parent_num, middle_cell_binary, rsibling)
 
+        return rsibling
 
 #could put these two together, but I dont care
 def table_leaf_split_page(file_name, split_page_num, cell2insert):
@@ -929,7 +1047,7 @@ def table_leaf_split_page(file_name, split_page_num, cell2insert):
     middle_cell = int((num_cells+1)/2) #have to add one since we havent actually added the cell
     middle_cell_binary = cells[middle_cell]['cell_binary']
     middle_rowid = cells[middle_cell]['rowid']
-    rightmost_sibling_page = values['rightmost_sibling_page']
+    right_sibling_page = values['right_sibling_page']
 
     if parent_num==-1: #IS ROOT ->create two children
         rchild_num = write_new_page(table_name, is_table, False, -1, split_page_num)
@@ -950,126 +1068,62 @@ def table_leaf_split_page(file_name, split_page_num, cell2insert):
         page_insert_cell(file_name, split_page_num, middle_cell_binary)
 
     else: #Non-root ->propagate upward
-        rsibling = write_new_page(table_name, is_table, is_interior, rightmost_sibling_page, parent_num)
+        rsibling = write_new_page(table_name, is_table, is_interior, right_sibling_page, parent_num)
         update_page_header(file_name, split_page_num, rsibling_rchild=rsibling)
         for i in range(middle_cell, num_cells): #Copy cells into right sibling
             cell = cells[i]['cell_binary']
             page_insert_cell(file_name, rsibling, cell)
         page_insert_cell(file_name, rsibling, cell2insert)
+
         j=middle_cell
         for i in range(middle_cell, num_cells):
             page_delete_cell(file_name, split_page_num, j)
+
         middle_cell_binary = table_create_cell([], [], True, left_child_page=split_page_num,  rowid=middle_rowid)
         update_page_header(file_name, parent_num, rsibling_rchild=rsibling)
         try:
             page_insert_cell(file_name, parent_num, middle_cell_binary)
         except:
-            table_interior_split_page(file_name, parent_num, middle_cell_binary, rsibling)
-
+            new_parent = table_interior_split_page(file_name, parent_num, middle_cell_binary, rsibling)
+            update_page_header(file_name,rsibling, parent = new_parent)
+            update_page_header(file_name, split_page_num, parent = new_parent)
 
 
 def schema_from_catalog(table_name):
-    data = read_all_pages_in_file(file_name)
+    data = read_all_pages_in_file('davisbase_columns.tbl')
     all_cells = []
     all_data = []
     for page in data:
+        if not page['is_leaf']:
+            continue
         for cell in page['cells']:
-            if cell['data'][0]==table_name:
+            if cell['data'][1]=='rowid':
+                continue
+            if cell['data'][0].lower()==table_name.lower():
                 all_cells.append((cell['data'][3],cell['data'][2])) #list of [(ord_pos, dtype)]
                 all_data.append(cell)
-    sorted(all_cells, key=lambda x: x[0])
+    all_cells = sorted(all_cells, key=lambda x: x[0])
     schema = [i[1] for i in all_cells]
     return schema, all_data
 
-def get_next_page_rowid(table_name):
-    pages = read_all_pages_in_file(table_name+'.tbl')
-    sorted(all_data, key=lambda x: x['page_number'])
-    next_page = pages[-1]
-    sorted(next_page['cells'], key=lambda x: x['rowid'])
-    next_rowid = next_page['cells'][-1]['rowid']
-    return next_page['page_number'], next_rowid
 
 
 def get_indexes(table_name):
     indexes=[]
     for filename in os.listdir():
-        if filename[:len(table_name)]==table_name:
-            indexes.append(file_name)
+        if (filename[:len(table_name)]==table_name) and (filename[-4:]=='.ndx'):
+            indexes.append(filename)
     return indexes
 
 
-def catalog_add_table(dictionary):
-    """
-    dictionary = {
-    'table_name':{
-        "column1":{
-            'data_type':"int",
-            'ordinal_position':1,
-            'is_nullable':'YES',
-            'indexed':True
-            }
-        }
-    }
-    """
-    table = list(dictionary.keys())
-    assert(len(table)==1)
-    table_name = table[0]
-    column_names = list(dictionary[table_name].keys())
-    columns = list(dictionary[table_name].values())
-    insert("davisbase_tables", [table_name])
-    for col in column_names:
-        values=[table_name, col, columns[col]['data_type'], columns[col]['ordinal_position'], columns[col]['is_nullable']]
-        insert("davisbase_columns", values)
+
+#########################################################################
+# TESTING
 
 
-def initialize_indexes(column_dictionary):
-    """
-    dictionary = {
-    'table_name':{
-        "column1":{
-            'data_type':"int",
-            'ordinal_position':1,
-            'is_nullable':'YES',
-            'indexed':True
-            }
-        }
-    }
-    """
-    table = list(dictionary.keys())
-    table_name = table[0]
-    column_names = list(dictionary[table_name].keys())
-    columns = list(dictionary[table_name].values())
-
-    for col in column_names:
-        if columns[col][indexed]==True:
-            index_name = table_name+'_'+col
-            initialize_file(table_name, False)
-    return None
 
 
-def create_table(command):
-    table_name, column_dictionary = parse_create_table(command)
-    initialize_file(table_name, True)
-    catalog_add_table(column_dictionary)
-    initialize_indexes(column_dictionary)
-    return None
 
-def page_cell_indx_given_rowid(table_name, rowid):
-    page_num=0
-    pages = read_all_pages_in_file(table_name+'.tbl')
-    return get_page(pages, value, page_num)
-
-def get_page_indx(pages, value, page_num):
-    for cell_indx , cell in enumerate(pages[page_num][cells]):
-        if cell['rowid']==value: #got a match
-            return page_num, cell_indx
-        elif pages[page_num]['is_leaf']: #no match, but a leaf node
-            return page_num, None
-        elif cell['rowid']>rowid:
-            page_num = cell['left_child_page']
-            return traverse_node(pages, value, page_num)
-    page_num = pages[page_num]['rightmost_child_page']
-    return traverse_node(pages, value, page_num)
 
 #############################################################################
 #IN PROGRESS
@@ -1077,6 +1131,49 @@ def get_page_indx(pages, value, page_num):
 """
 -Update davisbase_columns with a unique, is_key columns, build a function to check consistency
 """
+
+
+def index_where_should_it_go(file_name, index_value):
+    """rowid will not be present, but will key value be present?
+    if kv present -> append rowid to cell
+    if kv not present -> create new cell insert to page
+
+    if finds kv-> if cell has room -> insert
+                ->if no room -> create_cell -> insert in left child"""
+    kv_present = False
+    page_num = 0
+
+
+    return kv_present, page_num, cell_index
+
+
+def page_cell_indx_given_index_value(file_name, index_value):
+    page_num=0
+    pages = read_all_pages_in_file(file_name)
+    return get_page_cell_indx(pages, rowid, page_num)
+
+
+def get_page_cell_indx(pages, value, page_num):
+    is_table= pages[page_num]['is_table']
+    is_leaf = pages[page_num]['is_leaf']
+    assert(is_table)
+    for cell_indx, cell in enumerate(pages[page_num]['cells']):
+        if (cell['rowid'] == value and is_leaf): #got a match
+            return page_num, cell_indx
+
+        elif (cell['rowid'] > value and not is_leaf): #same
+            page_num = cell['left_child_page']
+            return get_page_cell_indx(pages, value, page_num)
+
+        elif (cell['rowid']<=value and not is_leaf):
+            page_num = pages[page_num]['rightmost_child_page']
+            return get_page_cell_indx(pages, value, page_num)
+        else:
+            pass
+    if is_leaf: #No match and is leaf node
+        return page_num, None
+    else:
+        assert(False)
 
 
 def insert(table_name, values):
@@ -1090,22 +1187,37 @@ def insert(table_name, values):
         table_leaf_split_page(table_name+'.tbl', next_page, cell)
 
     for filename in get_indexes(table_name):
+        indexed_colname = filename[len(table_name)+1:-4]
         for col in all_col_data:
-            if col['data'][1]==file_name[len(table_name)+1:-4]:
+            if col['data'][1]==indexed_colname:
                 index_dtype= col['data'][2]
                 index_value= values[col['data'][3]] #index by ord position
-        next_page  = index_get_next_page(index_value)
-        try:
-            index_page_insert_cell(index_dtype, index_value, next_rowid)
-        except:
-            cell=
-            index_leaf_split_page(table_name+'.tbl', next_page, cell)
+
+        page, cell_indx = page_cell_indx_given_index_value(filename, index_value)
+
+        if cell_no is None:
+            cell = index_create_cell()
+            try:
+                index_page_insert_cell(index_dtype, index_value, next_rowid)
+            except:
+                index_leaf_split_page(table_name+'.tbl', next_page, cell)
+        else:
+            add_to_cell(filename, page, cell_indx)
+
     return None
 
 
 
+
+
+
+
+
+
+
+
 def delete(table_name, rowid):
-    page_num, cell_indx = page_cell_indx_given_rowid(table_name, rowid)
+    page_num, cell_indx = page_cell_indx_given_index_value(table_name, rowid)
     if cell_indx is None: #no value found
         return None
     else:
@@ -1123,9 +1235,10 @@ def delete(table_name, rowid):
             try:
                 index_page_delete_cell(index_dtype, index_value, next_rowid)
             except:
-                cell=
                 index_leaf_merge_page(table_name+'.tbl', next_page, cell)
         return None
+
+
 
 
 def update(table_name, new_values):
@@ -1150,7 +1263,7 @@ def update(table_name, new_values):
   'is_leaf': True,
   'num_cells': 5,
   'available_bytes': 245,
-  'rightmost_sibling_page': -1,
+  'right_sibling_page': -1,
   'cells': [{'bytes': 47,
     'rowid': 5,
     'data': ['davisbas"""
@@ -1267,6 +1380,7 @@ def extract_definitions(token_list):
         definitions.append(tmp)
     return definitions
 
+
 def parse_create_table(SQL):
     """
     Parses the raw, lower-cased input from the CLI controller. Will identify table name,
@@ -1347,29 +1461,6 @@ def delete_all_table_data(table_name):
     bool: success_flag
     """
     return False
-
-
-def catalog_add_table(dictionary, rowid):
-    """
-    dictionary = {
-    'table_name':{
-        "column1":{
-            'data_type':"int",
-            'ordinal_position':1,
-            'is_nullable':'YES',
-            }
-        }
-    }
-    """
-    table = list(dictionary.keys())
-    assert(len(table)==1)
-    table_name = table[0]
-
-
-    davisbase_tables_schema = ['text']
-    davisbase_columns_schema = ['text', 'text', 'text', 'int', 'text']
-
-
 
 
 def create_index(command):
