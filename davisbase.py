@@ -50,57 +50,12 @@ def check_input(command):
         print("Command \"{}\" not recognized".format(command))
 
 ####################################################################
-#TABLE FUNCTIONS for Harrison to complete
+# COMPLETED FUNCTIONS
 
 
 
 
 
-def init():
-    if os.path.exists('davisbase_columns.tbl'):
-        pass
-    else:
-        initialize_file('davisbase_columns', True)
-        file_name = "davisbase_columns.tbl"
-        davisbase_columns_schema = ['TEXT', 'TEXT', 'TEXT', 'TINYINT', 'TEXT']
-
-        cells = [["davisbase_tables", "rowid", "INT", 1, "NO" ],
-                ["davisbase_tables", "table_name", "TEXT", 2, "NO" ],
-                 ["davisbase_columns", "rowid", "INT", 1, "NO" ],
-                ["davisbase_columns", "table_name", "TEXT", 2, "NO" ],
-                ["davisbase_columns", "column_name", "TEXT", 3, "NO" ],
-                ["davisbase_columns", "data_type", "TEXT", 4, "NO" ],
-                ["davisbase_columns", "ordinal_position", "TINYINT", 5, "NO" ],
-                ["davisbase_columns", "is_nullable", "TEXT", 6, "NO" ]]
-
-        for i, cell in enumerate(cells):
-            cell = table_create_cell(davisbase_columns_schema, cell, False, left_child_page=None,  rowid=i+1)
-            try:
-                page_insert_cell(file_name, 0, cell)
-            except:
-                print("cell_size:",len(cell))
-                file_bytes = load_file(file_name)
-                print("Remaining space in page:", page_available_bytes(file_bytes, 0))
-
-
-    if os.path.exists('davisbase_tables.tbl'):
-        pass
-    else:
-        initialize_file('davisbase_tables', True)
-        file_name = "davisbase_tables.tbl"
-        davisbase_tables_schema = ['TEXT']
-
-        cells = [["davisbase_tables"],
-                ["davisbase_columns"]]
-
-        for i, cell in enumerate(cells):
-            cell = table_create_cell(davisbase_tables_schema, cell, False, left_child_page=None,  rowid=i+1)
-            try:
-                page_insert_cell(file_name, 0, cell)
-            except:
-                print("cell_size:",len(cell))
-                file_bytes = load_file(file_name)
-                print("Remaining space in page:", page_available_bytes(file_bytes, 0))
 
 def help():
     print("DavisBase supported commands.")
@@ -846,7 +801,7 @@ def read_all_pages_in_file(file_name):
     return data
 
 #########################################################################
-#Testinging
+# TESTING
 
 def table_interior_split_page(file_name, split_page_num, cell2insert, new_rightmost_page):
     file_bytes = load_file(file_name)
@@ -969,17 +924,26 @@ def table_leaf_split_page(file_name, split_page_num, cell2insert):
 
 
 def schema_from_catalog(table_name):
-    data = read_all_pages_in_file(file_name)
+    data = read_all_pages_in_file('davisbase_columns.tbl')
     all_cells = []
     all_data = []
     for page in data:
         for cell in page['cells']:
-            if cell['data'][0]==table_name:
+            if cell['data'][0].lower()==table_name.lower():
                 all_cells.append((cell['data'][3],cell['data'][2])) #list of [(ord_pos, dtype)]
                 all_data.append(cell)
-    sorted(all_cells, key=lambda x: x[0])
+    all_cells = sorted(all_cells, key=lambda x: x[0])
     schema = [i[1] for i in all_cells]
     return schema, all_data
+
+
+
+#############################################################################
+#IN PROGRESS
+
+"""
+-Update davisbase_columns with a unique, is_key columns, build a function to check consistency
+"""
 
 def get_next_page_rowid(table_name):
     pages = read_all_pages_in_file(table_name+'.tbl')
@@ -997,54 +961,6 @@ def get_indexes(table_name):
             indexes.append(file_name)
     return indexes
 
-
-def catalog_add_table(dictionary):
-    """
-    dictionary = {
-    'table_name':{
-        "column1":{
-            'data_type':"int",
-            'ordinal_position':1,
-            'is_nullable':'YES',
-            'indexed':True
-            }
-        }
-    }
-    """
-    table = list(dictionary.keys())
-    assert(len(table)==1)
-    table_name = table[0]
-    column_names = list(dictionary[table_name].keys())
-    columns = list(dictionary[table_name].values())
-    insert("davisbase_tables", [table_name])
-    for col in column_names:
-        values=[table_name, col, columns[col]['data_type'], columns[col]['ordinal_position'], columns[col]['is_nullable']]
-        insert("davisbase_columns", values)
-
-
-def initialize_indexes(column_dictionary):
-    """
-    dictionary = {
-    'table_name':{
-        "column1":{
-            'data_type':"int",
-            'ordinal_position':1,
-            'is_nullable':'YES',
-            'indexed':True
-            }
-        }
-    }
-    """
-    table = list(dictionary.keys())
-    table_name = table[0]
-    column_names = list(dictionary[table_name].keys())
-    columns = list(dictionary[table_name].values())
-
-    for col in column_names:
-        if columns[col][indexed]==True:
-            index_name = table_name+'_'+col
-            initialize_file(table_name, False)
-    return None
 
 
 def create_table(command):
@@ -1071,13 +987,58 @@ def get_page_indx(pages, value, page_num):
     page_num = pages[page_num]['rightmost_child_page']
     return traverse_node(pages, value, page_num)
 
-#############################################################################
-#IN PROGRESS
 
-"""
--Update davisbase_columns with a unique, is_key columns, build a function to check consistency
-"""
 
+
+
+def initialize_indexes(column_dictionary):
+    """
+    dictionary = {
+    'table_name':{
+        "column1":{
+            'data_type':"int",
+            'ordinal_position':1,
+            'is_nullable':'YES',
+            'primary_key':True
+            }
+        }
+    }
+    """
+    table = list(dictionary.keys())
+    table_name = table[0]
+    column_names = list(dictionary[table_name].keys())
+    columns = list(dictionary[table_name].values())
+
+    for col in column_names:
+        if columns[col][indexed]==True:
+            index_name = table_name+'_'+col
+            initialize_file(table_name, False)
+    return None
+
+
+def catalog_add_table(dictionary):
+    """
+    dictionary = {
+    'table_name':{
+        "column1":{
+            'data_type':"int",
+            'ordinal_position':1,
+            'is_nullable':'YES',
+            'unique':'NO'
+            'primary_key':'YES'
+            }
+        }
+    }
+    """
+    table = list(dictionary.keys())
+    assert(len(table)==1)
+    table_name = table[0]
+    column_names = list(dictionary[table_name].keys())
+    columns = list(dictionary[table_name].values())
+    insert("davisbase_tables", [table_name])
+    for col in column_names:
+        values=[table_name, col, columns[col]['data_type'], columns[col]['ordinal_position'], columns[col]['is_nullable']]
+        insert("davisbase_columns", values)
 
 def insert(table_name, values):
     """values would be a list of length self.columns, NULL represented as None"""
@@ -1126,6 +1087,54 @@ def delete(table_name, rowid):
                 cell=
                 index_leaf_merge_page(table_name+'.tbl', next_page, cell)
         return None
+
+
+
+def init():
+    if os.path.exists('davisbase_columns.tbl'):
+        pass
+    else:
+        initialize_file('davisbase_columns', True)
+        file_name = "davisbase_columns.tbl"
+        davisbase_columns_schema = ['TEXT', 'TEXT', 'TEXT', 'TINYINT', 'TEXT']
+
+        cells = [["davisbase_tables", "rowid", "INT", 1, "NO" ],
+                ["davisbase_tables", "table_name", "TEXT", 2, "NO" ],
+                 ["davisbase_columns", "rowid", "INT", 1, "NO" ],
+                ["davisbase_columns", "table_name", "TEXT", 2, "NO" ],
+                ["davisbase_columns", "column_name", "TEXT", 3, "NO" ],
+                ["davisbase_columns", "data_type", "TEXT", 4, "NO" ],
+                ["davisbase_columns", "ordinal_position", "TINYINT", 5, "NO" ],
+                ["davisbase_columns", "is_nullable", "TEXT", 6, "NO" ]]
+
+        for i, cell in enumerate(cells):
+            cell = table_create_cell(davisbase_columns_schema, cell, False, left_child_page=None,  rowid=i+1)
+            try:
+                page_insert_cell(file_name, 0, cell)
+            except:
+                print("cell_size:",len(cell))
+                file_bytes = load_file(file_name)
+                print("Remaining space in page:", page_available_bytes(file_bytes, 0))
+
+
+    if os.path.exists('davisbase_tables.tbl'):
+        pass
+    else:
+        initialize_file('davisbase_tables', True)
+        file_name = "davisbase_tables.tbl"
+        davisbase_tables_schema = ['TEXT']
+
+        cells = [["davisbase_tables"],
+                ["davisbase_columns"]]
+
+        for i, cell in enumerate(cells):
+            cell = table_create_cell(davisbase_tables_schema, cell, False, left_child_page=None,  rowid=i+1)
+            try:
+                page_insert_cell(file_name, 0, cell)
+            except:
+                print("cell_size:",len(cell))
+                file_bytes = load_file(file_name)
+                print("Remaining space in page:", page_available_bytes(file_bytes, 0))
 
 
 def update(table_name, new_values):
