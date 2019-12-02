@@ -1166,15 +1166,46 @@ def insert_into(command):
             table_leaf_split_page(table_name+'.tbl', next_page, cell)
         for filename in indexes:
             index_colname = filename[len(table_name)+1:-4]
-            for i, col in enumerate(col_names):
-                if col==index_colname:
-                    index_dtype= schema[i]
-                    index_value= val[i] #index by ord position
+            i = col_names.index(index_colname)
+            index_dtype= schema[i]
+            index_value= val[i] #index by ord position
             index_insert(table_name, index_colname, index_dtype, index_value, next_rowid)
 
 
+def delete_from(command):
+    table_name, condition = parse_delete_from(command)
+    cells = WHERE_FUNCTION(table_name, condition)
+    col_names = get_column_names_from_catalog(table_name)[1:]
+    indexes = get_indexes(table_name)
+    for cell in cells:
+        table_delete(table_name, cell)
+        for filename in indexes:
+            index_colname = filename[len(table_name)+1:-4]
+            i = col_names.index(index_colname) #get position
+            index_value = cell['data'][i] #index by ord position
+            index_delete(table_name, index_colname, index_value, cell['rowid'])
 
 
+def update(command):
+    """
+    dict_new_values = {
+    "column1":new_value_to_update_to,
+    "column2":new_value_to_update_to,
+    "column4":new_value_to_update_to,
+    }"""
+    table_name, condition, dict_new_values = parse_delete_from(command)
+    cells = WHERE_FUNCTION(table_name, condition)
+    col_names = get_column_names_from_catalog(table_name)[1:]
+    indexes = get_indexes(table_name)
+    for cell in cells:
+        table_update(table_name, cell, dict_new_values)
+        for filename in indexes:
+            index_colname = filename[len(table_name)+1:-4]
+            if index_colname in dict_new_values:
+                i = col_names.index(index_colname) #get position
+                index_value = cell['data'][i] #index by ord position
+                new_index_value = dict_new_values[index_colname]
+                index_update(table_name, index_colname, index_value, cell['rowid'], new_index_value)
 
 
 #########################################################################
@@ -1644,30 +1675,6 @@ def delete(table_name, rowid):
 
 def update(table_name, new_values):
     return None
-
-
-"""
-[{'page_number': 0,
-  'parent_page': -1,
-  'is_table': True,
-  'is_leaf': False,
-  'num_cells': 1,
-  'available_bytes': 486,
-  'rightmost_child_page': 1,
-  'cells': [{'left_child_page': 2,
-    'rowid': 5,
-    'cell_size': 8,
-    'cell_binary': b'\x02\x00\x00\x00\x05\x00\x00\x00'}]},
- {'page_number': 1,
-  'parent_page': 0,
-  'is_table': True,
-  'is_leaf': True,
-  'num_cells': 5,
-  'available_bytes': 245,
-  'right_sibling_page': -1,
-  'cells': [{'bytes': 47,
-    'rowid': 5,
-    'data': ['davisbas"""
 
 
 
