@@ -2,7 +2,7 @@ import os
 import struct
 import sys
 from datetime import datetime, time
-import regex as re
+import re
 import pdb
 
 ############################################################################
@@ -739,7 +739,25 @@ def update_page_header(file_name, page_num, rsibling_rchild=None, is_interior=No
         if page[0] in [5,13]:
             is_table = True
         else:
-            is_table = False
+            rchild_num = write_new_page(table_name, is_table, is_interior, rsibling_rchild, parent_num)
+            lchild_num = write_new_page(table_name, is_table, is_interior, rchild_num, parent_num)
+
+        for i in range(middle_cell):
+            #EXTRACT CELL VALUES (ROWID)
+            cell = table_create_cell(schema, value_list, is_interior, left_child_page=None,  rowid=None)
+            page_insert_cell(file_name, lchild_num, cell)
+
+        for i in range(middle_cell, num_cells):
+            #EXTRACT CELL VALUES (ROWID)
+            cell = table_create_cell(schema, value_list, is_interior, left_child_page=None,  rowid=None)
+            page_insert_cell(file_name, lchild_num, cell)
+    else:
+        try:
+            #insert(cell into paretn)
+            pass
+        except:
+            #bplus_split_page(parent)
+            pass
 
         if is_table and is_interior:
             page[0:1] = b'\x05'
@@ -1449,6 +1467,7 @@ def index_interior_split_page(file_name, split_page_num, cell2insert, new_rightm
     middle_cell_binary = insert_order[middle_cell]['cell_binary']
     middle_index = insert_order[middle_cell]['index_value']
     rightmost_child_page_right = new_rightmost_page
+
     rightmost_child_page_left = insert_order[middle_cell]['left_child_page']
 
     if parent_num==-1: #ROOT CONDITION #children will also be interior nodes
@@ -1595,6 +1614,36 @@ def index_leaf_split_page(file_name, split_page_num, cell2insert, index_dtype, i
 
 
 
+def page_cell_indx_given_index_value(file_name, index_value):
+    page_num=0
+    pages = read_all_pages_in_file(file_name)
+    return get_page_cell_indx(pages, rowid, page_num)
+
+
+def get_page_cell_indx(pages, value, page_num):
+    is_table= pages[page_num]['is_table']
+    is_leaf = pages[page_num]['is_leaf']
+    assert(is_table)
+    for cell_indx, cell in enumerate(pages[page_num]['cells']):
+        if (cell['rowid'] == value and is_leaf): #got a match
+            return page_num, cell_indx
+
+        elif (cell['rowid'] > value and not is_leaf): #same
+            page_num = cell['left_child_page']
+            return get_page_cell_indx(pages, value, page_num)
+
+        elif (cell['rowid']<=value and not is_leaf):
+            page_num = pages[page_num]['rightmost_child_page']
+            return get_page_cell_indx(pages, value, page_num)
+        else:
+            pass
+    if is_leaf: #No match and is leaf node
+        return page_num, None
+    else:
+        assert(False)
+
+
+
 def delete(table_name, rowid):
     page_num, cell_indx = page_cell_indx_given_index_value(table_name, rowid)
     if cell_indx is None: #no value found
@@ -1717,8 +1766,6 @@ def check_values_match_schema(values,schema):
 
 
 
-
-
 #########################################################################
 # DDL FUNCTION
 
@@ -1789,8 +1836,6 @@ def parse_create_table(SQL):
         definitions = ''.join(str(t) for t in column).split(',')
         for definition in definitions:
             d = ' '.join(str(t) for t in definition.split())
-#             print('NAME: {name} DEFINITION: {definition}'.format(name=definition.split()[0],
-#                                                                  definition=d))
             col_list.append(definition.split()[0])
             definition_list.append(d)
 
@@ -1904,13 +1949,44 @@ def query(command: str):
         where_clause = str(stmt.tokens[-1])
         where_clause = re.sub("\s", "", re.split(';',re.sub("(?i)where","",where_clause))[0])
         where_clause = re.split('=|>|<|>=|<=|\s',where_clause)
-        print(where_clause)
-        tablename = str(stmt.tokens[-3]).split(",")
+        tablename = str(stmt.tokens[-3]).split(",")[0]
         columns = str(stmt.tokens[2]).split(",")
-        print(where_clause,"\t",tablename,"\t",columns)
+#         print(where_clause,"\t",tablename,"\t",columns)
+        return where_clause, tablename, columns
     else:
-        print("Enter correct query")
+        
+        return -1,-1,-1
+        
 
+def select_from(SQL):
+    
+    where_condition, table_name, columns =  query(SQL)
+    print(table_name, where_condition[0], where_condition[1])
+    
+#     column_list = get_column_names_from_catalog(table_name)
+    
+#     index = column_list.index(where_condition[0])
+    
+    if where_condition == -1:
+        print("Enter correct query")
+        
+    flag = False
+    for node in read_all_pages_in_file("davisbase_columns.tbl"):
+        if node['is_leaf'] :
+            for cell in node['cells']:
+                data = cell['data']
+                
+                if data[0] == table_name and data[1] == where_condition[0]:
+                    if data[2] == 'INT' and data[3] == int(where_condition[1]):
+                        print(cell)
+                        flag = True
+                        break
+                    elif data[2] == 'TEXT' and data[3] == str(where_condition[1]):
+                        print(cell)
+                        flag = True
+                        break
+        if flag:
+            break
 
 #############################################################################
 PAGE_SIZE = 512
