@@ -684,14 +684,12 @@ def bplus_split_page(file_bytes, page_num):
             cell = table_create_cell(schema, value_list, is_interior, left_child_page=None,  rowid=None)
             page_insert_cell(file_name, lchild_num, cell)
     else:
-
-
-
-
-    try:
-        insert(cell into paretn)
-    except:
-        bplus_split_page(parent)
+        try:
+            #insert(cell into paretn)
+            pass
+        except:
+            #bplus_split_page(parent)
+            pass
 
     return None
 
@@ -956,7 +954,7 @@ class Catalog:
 #CLI FUNCTIONS
 
 def get_columnlist(table):
-
+    
     
 
 
@@ -1106,8 +1104,6 @@ def parse_create_table(SQL):
         definitions = ''.join(str(t) for t in column).split(',')
         for definition in definitions:
             d = ' '.join(str(t) for t in definition.split())
-#             print('NAME: {name} DEFINITION: {definition}'.format(name=definition.split()[0],
-#                                                                  definition=d))
             col_list.append(definition.split()[0])
             definition_list.append(d)
     
