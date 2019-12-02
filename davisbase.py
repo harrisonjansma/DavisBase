@@ -912,35 +912,56 @@ def get_next_page_rowid(table_name):
 
 
 
-def page_cell_indx_given_index_value(file_name, index_value):
+def page_cell_indx_given_key(pages, index_value):
     """Given rowid, returns the page and cell where the cell should go"""
     page_num=0
-    pages = read_all_pages_in_file(file_name)
+    if len(pages[page_num]['cells'])==0:
+        return page_num, None
     return get_page_cell_indx(pages, index_value, page_num)
+
 
 
 def get_page_cell_indx(pages, value, page_num):
     """Given rowid, returns the page and cell where the cell should go"""
-    is_table= pages[page_num]['is_table']
-    is_leaf = pages[page_num]['is_leaf']
-    assert(is_table)
-    for cell_indx, cell in enumerate(pages[page_num]['cells']):
-        if (cell['rowid'] == value and is_leaf): #got a match
-            return page_num, cell_indx
-
-        elif (cell['rowid'] > value and not is_leaf): #same
-            page_num = cell['left_child_page']
-            return get_page_cell_indx(pages, value, page_num)
-
-        elif (cell['rowid']<=value and not is_leaf):
-            page_num = pages[page_num]['rightmost_child_page']
-            return get_page_cell_indx(pages, value, page_num)
-        else:
-            pass
-    if is_leaf: #No match and is leaf node
-        return page_num, None
+    page = pages['page_num']
+    is_table= page['is_table']
+    is_leaf = page['is_leaf']
+    if not is_table:
+        for i, cell in enumerate(page['cells']):
+            if cell['index_value']==index_value:
+                return page_num, i
+            elif cell['index_value'] > index_value:
+                if not page['is_leaf']:
+                    return get_page_cell_indx(pages, value, cell['left_child_page'])
+                else:
+                    return page_num, i
+            else:
+                if page['is_leaf'] and i+1==len(page['cells']):
+                    return page_num, len(page['cells'])
+                if not page['is_leaf'] and i+1==len(page['cells']):
+                    return get_page_cell_indx(pages, value, page['rightmost_child_page'])
+                else:
+                    continue
     else:
-        assert(False)
+        for cell_indx, cell in enumerate(page['cells']):
+            if (cell['rowid'] == value):
+                if is_leaf: #got a match
+                    return page_num, cell_indx
+                else:
+                    continue #next iteration will get it
+            elif (cell['rowid'] > value): #same
+                if not is_leaf:
+                    return get_page_cell_indx(pages, value, cell['left_child_page'])
+                else:
+                    return page_num, cell_indx
+
+            elif (cell['rowid']<value ):
+                if not is_leaf:
+                    return get_page_cell_indx(pages, value, page['rightmost_child_page'])
+                else:
+                    return page_num, len(page['cells'])
+            else:
+                assert(False)
 
 
 def get_column_names_from_catalog(table_name):
@@ -1127,7 +1148,12 @@ def create_index(command):
 """Also need a function to check for uniqueness, not nullness"""
 def insert_into(command):
     """values would be a list of length self.columns, NULL represented as None"""
-    table_name, values = insert_into_parser(command)
+    """Parser needs to return "table_name", [[col1,col2,col3],[col1,col2,col3],[col1,col2,col3]]"""
+    table_name, values = parse_insert_into(command)
+    violation_flag, violating_row = FUNCTION_TO_CHECK_CONSTRAINTS_THAT_WE_DONT_HAVE_YET(table_name, values)
+    if violation_flag: #if violation fail insert
+        print("Constraint violated for row {}".format(violating_row))
+        return None
     schema, all_col_data = schema_from_catalog(table_name)
     col_names = get_column_names_from_catalog(table_name)[1:]
     indexes = get_indexes(table_name)
@@ -1145,7 +1171,7 @@ def insert_into(command):
                     index_dtype= schema[i]
                     index_value= val[i] #index by ord position
             index_insert(table_name, index_colname, index_dtype, index_value, next_rowid)
-    
+
 
 
 
@@ -1385,54 +1411,28 @@ def index_insert(table_name, column_name, index_dtype, index_value, rowid):
     file_name = table_name+'_'+column_name+'.ndx'
     pages = read_all_pages_in_file(file_name)
 
-    page_num = 0
-    stop=False
-    while not stop:
-        page = pages[page_num]
-        if len(page['cells'])==0:
-            res = (page_num, None)
-            break
-        for i, cell in enumerate(page['cells']):
-            if cell['index_value']==index_value:
-                if rowid not in cell['assoc_rowids']:
-                    add_rowid_to_cell(file_name, page_num, i, rowid, cell)
-                res = (None, None)
-                stop = True
-                break
-            elif cell['index_value'] > index_value:
-                if not page['is_leaf']:
-                    page_num = cell['left_child_page']
-                    break
-                else:
-                    res = (page_num, i)
-                    stop = True
-                    break
-            else:
-                if page['is_leaf'] and i+1==len(page['cells']):
-                    res = (page_num, len(page['cells']))
-                    stop = True
-                    break
-                if not page['is_leaf'] and i+1==len(page['cells']):
-                    page_num = page['rightmost_child_page']
-                    break
-                else:
-                    continue
+    page_num, cell_indx = page_cell_indx_given_key(pages, index_value)
+    page = pages[page_num]
 
-    if res[0] is None: #found rowid in tree, inserted there if not present
-        return
+    if len(page['cells'])!=cell_indx:
+        cell = page['cells'][cell_indx]
+        if cell['index_value']==index_value: #add to the list
+            if rowid not in cell['assoc_rowids']:
+                add_rowid_to_cell(file_name, page_num, cell_indx, rowid, cell)
+                return
+            else: #rowid already exists
+                return
     else:
-        page_num = res[0]
-        cell_position = res[1]
         cell = index_create_cell(index_dtype, index_value, [rowid], False, left_child_page=None)
         #running low on space
         if pages[page_num]['available_bytes']/PAGE_SIZE<0.5:
-            index_leaf_split_page(file_name, page_num, cell, index_dtype, cell_position)
+            index_leaf_split_page(file_name, page_num, cell, index_dtype, cell_indx)
             return
         else:
             try:
-                index_insert_cell_in_page(file_name, page_num, cell, cell_position)
+                index_insert_cell_in_page(file_name, page_num, cell, cell_indx)
             except:
-                index_leaf_split_page(file_name, page_num, cell, index_dtype, cell_position)
+                index_leaf_split_page(file_name, page_num, cell, index_dtype, cell_indx)
 
 
 
@@ -1614,33 +1614,6 @@ def index_leaf_split_page(file_name, split_page_num, cell2insert, index_dtype, i
 
 
 
-def page_cell_indx_given_index_value(file_name, index_value):
-    page_num=0
-    pages = read_all_pages_in_file(file_name)
-    return get_page_cell_indx(pages, rowid, page_num)
-
-
-def get_page_cell_indx(pages, value, page_num):
-    is_table= pages[page_num]['is_table']
-    is_leaf = pages[page_num]['is_leaf']
-    assert(is_table)
-    for cell_indx, cell in enumerate(pages[page_num]['cells']):
-        if (cell['rowid'] == value and is_leaf): #got a match
-            return page_num, cell_indx
-
-        elif (cell['rowid'] > value and not is_leaf): #same
-            page_num = cell['left_child_page']
-            return get_page_cell_indx(pages, value, page_num)
-
-        elif (cell['rowid']<=value and not is_leaf):
-            page_num = pages[page_num]['rightmost_child_page']
-            return get_page_cell_indx(pages, value, page_num)
-        else:
-            pass
-    if is_leaf: #No match and is leaf node
-        return page_num, None
-    else:
-        assert(False)
 
 
 
@@ -1703,20 +1676,12 @@ def update(table_name, new_values):
 
 
 
-def index_get_next_page(index_value):
-    return None
-
 
 def table_merge_pages(file_names, parent_num):
     return None
 
 def index_merge_pages(file_names, parent_num):
     return None
-
-
-def index_sort_cells_from_page():
-    return None
-
 
 def table_merge_pages(file_bytes, parent_num, lchild_num, rchild_num):
     return None
@@ -1954,28 +1919,28 @@ def query(command: str):
 #         print(where_clause,"\t",tablename,"\t",columns)
         return where_clause, tablename, columns
     else:
-        
+
         return -1,-1,-1
-        
+
 
 def select_from(SQL):
-    
+
     where_condition, table_name, columns =  query(SQL)
     print(table_name, where_condition[0], where_condition[1])
-    
+
 #     column_list = get_column_names_from_catalog(table_name)
-    
+
 #     index = column_list.index(where_condition[0])
-    
+
     if where_condition == -1:
         print("Enter correct query")
-        
+
     flag = False
     for node in read_all_pages_in_file("davisbase_columns.tbl"):
         if node['is_leaf'] :
             for cell in node['cells']:
                 data = cell['data']
-                
+
                 if data[0] == table_name and data[1] == where_condition[0]:
                     if data[2] == 'INT' and data[3] == int(where_condition[1]):
                         print(cell)
