@@ -33,10 +33,10 @@ def check_input(command):
         insert_into(command)
 
     elif command[0:len("delete ")] == "delete ":
-        insert_into(command)
+        delete_from(command)
 
     elif command[0:len("update ")] == "update ":
-        insert_into(command)
+        update(command)
 
     elif command[0:len("select ")] == "select ":
         query(command)
@@ -44,8 +44,6 @@ def check_input(command):
     elif command == "exit;":
         return True
 
-    elif command == "test;":
-        return True
 
     else:
         print("Command \"{}\" not recognized".format(command))
@@ -1028,12 +1026,13 @@ def add_rowid_to_cell(file_name, page_num, cell_indx, rowid, cell):
         return
 
 
+
 def get_all_table_cells(table_name):
     """Grabs all the cells (no order)"""
-    pages  =read_all_pages_in_file(file_name)
+    pages  =read_all_pages_in_file(table_name+'.tbl')
     cells = []
     for page in pages:
-        if page["is_leaf"]:
+        if not page["is_leaf"]:
             continue
         else:
             for cell in page["cells"]:
@@ -1288,6 +1287,7 @@ def create_table(command):
     initialize_indexes(col_catalog_dictionary)
     return None
 
+
 """NEEDS CONNECTING TO CREATE_INDEX_PARSER"""
 def create_index(command):
     """Given the inputs of the command line, creates index on an existing table"""
@@ -1353,8 +1353,9 @@ def update(command):
     "column2":new_value_to_update_to,
     "column4":new_value_to_update_to,
     }"""
-    table_name, condition, dict_new_values = parse_delete_from(command)
+    table_name, condition, dict_new_values = parse_update(command)
     cells = WHERE_FUNCTION(table_name, condition)
+    violation_flag, violating_row = FUNCTION_TO_CHECK_CONSTRAINTS_THAT_WE_DONT_HAVE_YET(table_name, values)
     col_names = get_column_names_from_catalog(table_name)[1:]
     indexes = get_indexes(table_name)
     for cell in cells:
@@ -1366,6 +1367,23 @@ def update(command):
                 index_value = cell['data'][i] #index by ord position
                 new_index_value = dict_new_values[index_colname]
                 index_update(table_name, index_colname, index_value, cell['rowid'], new_index_value)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 #########################################################################
