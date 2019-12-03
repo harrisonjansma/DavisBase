@@ -728,7 +728,6 @@ def update_page_header(file_name, page_num, rsibling_rchild=None, is_interior=No
     """Updates the page header. for use in inserts/deletes"""
     is_table = file_name[-4:]=='.tbl'
     is_index=not is_table
-    is_leaf = not is_interior
     file_bytes = load_file(file_name)
     page = load_page(file_bytes, page_num)
     page = bytearray(page)
@@ -736,29 +735,7 @@ def update_page_header(file_name, page_num, rsibling_rchild=None, is_interior=No
         assert(len(file_bytes)/PAGE_SIZE>=rsibling_rchild)
         page[6:10] = struct.pack(endian+'i', rsibling_rchild)
     if is_interior is not None:
-        if page[0] in [5,13]:
-            is_table = True
-        else:
-            rchild_num = write_new_page(table_name, is_table, is_interior, rsibling_rchild, parent_num)
-            lchild_num = write_new_page(table_name, is_table, is_interior, rchild_num, parent_num)
-
-        for i in range(middle_cell):
-            #EXTRACT CELL VALUES (ROWID)
-            cell = table_create_cell(schema, value_list, is_interior, left_child_page=None,  rowid=None)
-            page_insert_cell(file_name, lchild_num, cell)
-
-        for i in range(middle_cell, num_cells):
-            #EXTRACT CELL VALUES (ROWID)
-            cell = table_create_cell(schema, value_list, is_interior, left_child_page=None,  rowid=None)
-            page_insert_cell(file_name, lchild_num, cell)
-    else:
-        try:
-            #insert(cell into paretn)
-            pass
-        except:
-            #bplus_split_page(parent)
-            pass
-
+        is_leaf = not is_interior
         if is_table and is_interior:
             page[0:1] = b'\x05'
         elif is_table and is_leaf:
@@ -911,59 +888,6 @@ def get_next_page_rowid(table_name):
     return final_page['page_number'], next_rowid + 1
 
 
-
-def page_cell_indx_given_key(pages, index_value):
-    """Given rowid, returns the page and cell where the cell should go"""
-    page_num=0
-    if len(pages[page_num]['cells'])==0:
-        return page_num, None
-    return get_page_cell_indx(pages, index_value, page_num)
-
-
-
-def get_page_cell_indx(pages, value, page_num):
-    """Given rowid, returns the page and cell where the cell should go"""
-    page = pages['page_num']
-    is_table= page['is_table']
-    is_leaf = page['is_leaf']
-    if not is_table:
-        for i, cell in enumerate(page['cells']):
-            if cell['index_value']==index_value:
-                return page_num, i
-            elif cell['index_value'] > index_value:
-                if not page['is_leaf']:
-                    return get_page_cell_indx(pages, value, cell['left_child_page'])
-                else:
-                    return page_num, i
-            else:
-                if page['is_leaf'] and i+1==len(page['cells']):
-                    return page_num, len(page['cells'])
-                if not page['is_leaf'] and i+1==len(page['cells']):
-                    return get_page_cell_indx(pages, value, page['rightmost_child_page'])
-                else:
-                    continue
-    else:
-        for cell_indx, cell in enumerate(page['cells']):
-            if (cell['rowid'] == value):
-                if is_leaf: #got a match
-                    return page_num, cell_indx
-                else:
-                    continue #next iteration will get it
-            elif (cell['rowid'] > value): #same
-                if not is_leaf:
-                    return get_page_cell_indx(pages, value, cell['left_child_page'])
-                else:
-                    return page_num, cell_indx
-
-            elif (cell['rowid']<value ):
-                if not is_leaf:
-                    return get_page_cell_indx(pages, value, page['rightmost_child_page'])
-                else:
-                    return page_num, len(page['cells'])
-            else:
-                assert(False)
-
-
 def get_column_names_from_catalog(table_name):
     """Returns the column names for a table in order"""
     schema, catalog_cells = schema_from_catalog(table_name, with_rowid=True)
@@ -1087,6 +1011,7 @@ def print_it(file_name, page_format=False, limit=None):
                 break
             print(row)
             i+=1
+
 
 def add_rowid_to_cell(file_name, page_num, cell_indx, rowid, cell):
     """Used in index insert, adds a rowid to list of associated rowids
@@ -1421,6 +1346,59 @@ def table_leaf_split_page(file_name, split_page_num, cell2insert):
             update_page_header(file_name,rsibling, parent = new_parent)
             update_page_header(file_name, split_page_num, parent = new_parent)
 
+
+
+
+def page_cell_indx_given_key(pages, index_value):
+    """Given rowid, returns the page and cell where the cell should go"""
+    page_num=0
+    if len(pages[page_num]['cells'])==0:
+        return page_num, None
+    return get_page_cell_indx(pages, index_value, page_num)
+
+
+
+def get_page_cell_indx(pages, value, page_num):
+    """Given rowid, returns the page and cell where the cell should go"""
+    page = pages['page_num']
+    is_table= page['is_table']
+    is_leaf = page['is_leaf']
+    if not is_table:
+        for i, cell in enumerate(page['cells']):
+            if cell['index_value']==index_value:
+                return page_num, i
+            elif cell['index_value'] > index_value:
+                if not page['is_leaf']:
+                    return get_page_cell_indx(pages, value, cell['left_child_page'])
+                else:
+                    return page_num, i
+            else:
+                if page['is_leaf'] and i+1==len(page['cells']):
+                    return page_num, len(page['cells'])
+                if not page['is_leaf'] and i+1==len(page['cells']):
+                    return get_page_cell_indx(pages, value, page['rightmost_child_page'])
+                else:
+                    continue
+    else:
+        for cell_indx, cell in enumerate(page['cells']):
+            if (cell['rowid'] == value):
+                if is_leaf: #got a match
+                    return page_num, cell_indx
+                else:
+                    continue #next iteration will get it
+            elif (cell['rowid'] > value): #same
+                if not is_leaf:
+                    return get_page_cell_indx(pages, value, cell['left_child_page'])
+                else:
+                    return page_num, cell_indx
+
+            elif (cell['rowid']<value ):
+                if not is_leaf:
+                    return get_page_cell_indx(pages, value, page['rightmost_child_page'])
+                else:
+                    return page_num, len(page['cells'])
+            else:
+                assert(False)
 
 
 
