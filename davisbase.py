@@ -1040,107 +1040,6 @@ def get_all_table_cells(table_name):
                 cells.append(cell)
     return cells
 
-###########################################################################
-
-
-
-
-
-###########################################################################
-# DONE, BUT NEEDS CONNECTING
-"""NEEDS CONNECTING TO CREATE_TABLE_PARSER"""
-def create_table(command):
-    """Given the inputs of the command line, creates table, metadata, and indexes"""
-    col_catalog_dictionary = parse_create_table(command)
-    table_name = list(col_catalog_dictionary.keys())[0]
-    initialize_file(table_name, True)
-    catalog_add_table(col_catalog_dictionary)
-    initialize_indexes(col_catalog_dictionary)
-    return None
-
-"""NEEDS CONNECTING TO CREATE_INDEX_PARSER"""
-def create_index(command):
-    """Given the inputs of the command line, creates index on an existing table"""
-    table_name, column_name = parse_create_index(command)
-    index_name = table_name+'_'+column_name
-    initialize_file(index_name, False) #create the index
-    columns = get_column_names_from_catalog(table_name)[1:] #column names minus rowid
-    schema, _ = schema_from_catalog(table_name)
-    ord_position =  columns.index(column_name) #position of data
-    index_dtype = schema[ord_position]
-    cells = get_all_table_cells(table_name)
-    for cell in cells:
-        rowid = cell['rowid']
-        index_value = cell['data'][ord_position]
-        index_insert(table_name, column_name, index_dtype, index_value, rowid)
-
-"""NEEDS CONNECTING TO CREATE_INDEX_PARSER"""
-"""Also need a function to check for uniqueness, not nullness"""
-def insert_into(command):
-    """values would be a list of length self.columns, NULL represented as None"""
-    """Parser needs to return "table_name", [[col1,col2,col3],[col1,col2,col3],[col1,col2,col3]]"""
-    table_name, values = parse_insert_into(command)
-    violation_flag, violating_row = FUNCTION_TO_CHECK_CONSTRAINTS_THAT_WE_DONT_HAVE_YET(table_name, values)
-    if violation_flag: #if violation fail insert
-        print("Constraint violated for row {}".format(violating_row))
-        return None
-    schema, all_col_data = schema_from_catalog(table_name)
-    col_names = get_column_names_from_catalog(table_name)[1:]
-    indexes = get_indexes(table_name)
-    for val in values:
-        next_page, next_rowid = get_next_page_rowid(table_name)
-        cell = table_create_cell(schema, values, False,  rowid=next_rowid)
-        try:
-            page_insert_cell(table_name+'.tbl', next_page, cell)
-        except:
-            table_leaf_split_page(table_name+'.tbl', next_page, cell)
-        for filename in indexes:
-            index_colname = filename[len(table_name)+1:-4]
-            i = col_names.index(index_colname)
-            index_dtype= schema[i]
-            index_value= val[i] #index by ord position
-            index_insert(table_name, index_colname, index_dtype, index_value, next_rowid)
-
-
-def delete_from(command):
-    table_name, condition = parse_delete_from(command)
-    cells = WHERE_FUNCTION(table_name, condition)
-    col_names = get_column_names_from_catalog(table_name)[1:]
-    indexes = get_indexes(table_name)
-    for cell in cells:
-        table_delete(table_name, cell)
-        for filename in indexes:
-            index_colname = filename[len(table_name)+1:-4]
-            i = col_names.index(index_colname) #get position
-            index_value = cell['data'][i] #index by ord position
-            index_delete(table_name, index_colname, index_value, cell['rowid'])
-
-
-def update(command):
-    """
-    dict_new_values = {
-    "column1":new_value_to_update_to,
-    "column2":new_value_to_update_to,
-    "column4":new_value_to_update_to,
-    }"""
-    table_name, condition, dict_new_values = parse_delete_from(command)
-    cells = WHERE_FUNCTION(table_name, condition)
-    col_names = get_column_names_from_catalog(table_name)[1:]
-    indexes = get_indexes(table_name)
-    for cell in cells:
-        table_update(table_name, cell, dict_new_values)
-        for filename in indexes:
-            index_colname = filename[len(table_name)+1:-4]
-            if index_colname in dict_new_values:
-                i = col_names.index(index_colname) #get position
-                index_value = cell['data'][i] #index by ord position
-                new_index_value = dict_new_values[index_colname]
-                index_update(table_name, index_colname, index_value, cell['rowid'], new_index_value)
-
-
-#########################################################################
-# TESTING
-
 def page_insert_cell(file_name, page_num, cell):
     """
     Inserts a bytestring into a page from a table or index file. Updates the page header. Fails if page-full
@@ -1215,6 +1114,17 @@ def page_delete_cells_on_and_after(file_name, page_num, cell_indx):
     assert(len(page)==PAGE_SIZE) #ensure page is same size
     return (num_cells - 1) == 0
 
+
+def table_insert(table_name, values):
+    """values would be a list of length self.columns, NULL represented as None"""
+    schema, all_col_data = schema_from_catalog(table_name)
+    next_page, next_rowid = get_next_page_rowid(table_name)
+    cell = table_create_cell(schema, values, False,  rowid=next_rowid)
+    try:
+        page_insert_cell(table_name+'.tbl', next_page, cell)
+    except:
+        table_leaf_split_page(table_name+'.tbl', next_page, cell)
+    return None
 
 
 
@@ -1360,6 +1270,108 @@ def table_leaf_split_page(file_name, split_page_num, cell2insert):
             update_page_header(file_name, split_page_num, parent = new_parent)
 
 
+###########################################################################
+
+
+
+
+
+###########################################################################
+# DONE, BUT NEEDS CONNECTING
+"""NEEDS CONNECTING TO CREATE_TABLE_PARSER"""
+def create_table(command):
+    """Given the inputs of the command line, creates table, metadata, and indexes"""
+    col_catalog_dictionary = parse_create_table(command)
+    table_name = list(col_catalog_dictionary.keys())[0]
+    initialize_file(table_name, True)
+    catalog_add_table(col_catalog_dictionary)
+    initialize_indexes(col_catalog_dictionary)
+    return None
+
+"""NEEDS CONNECTING TO CREATE_INDEX_PARSER"""
+def create_index(command):
+    """Given the inputs of the command line, creates index on an existing table"""
+    table_name, column_name = parse_create_index(command)
+    index_name = table_name+'_'+column_name
+    initialize_file(index_name, False) #create the index
+    columns = get_column_names_from_catalog(table_name)[1:] #column names minus rowid
+    schema, _ = schema_from_catalog(table_name)
+    ord_position =  columns.index(column_name) #position of data
+    index_dtype = schema[ord_position]
+    cells = get_all_table_cells(table_name)
+    for cell in cells:
+        rowid = cell['rowid']
+        index_value = cell['data'][ord_position]
+        index_insert(table_name, column_name, index_dtype, index_value, rowid)
+
+"""NEEDS CONNECTING TO CREATE_INDEX_PARSER"""
+"""Also need a function to check for uniqueness, not nullness"""
+def insert_into(command):
+    """values would be a list of length self.columns, NULL represented as None"""
+    """Parser needs to return "table_name", [[col1,col2,col3],[col1,col2,col3],[col1,col2,col3]]"""
+    table_name, values = parse_insert_into(command)
+    violation_flag, violating_row = FUNCTION_TO_CHECK_CONSTRAINTS_THAT_WE_DONT_HAVE_YET(table_name, values)
+    if violation_flag: #if violation fail insert
+        print("Constraint violated for row {}".format(violating_row))
+        return None
+    schema, all_col_data = schema_from_catalog(table_name)
+    col_names = get_column_names_from_catalog(table_name)[1:]
+    indexes = get_indexes(table_name)
+    for val in values:
+        next_page, next_rowid = get_next_page_rowid(table_name)
+        cell = table_create_cell(schema, values, False,  rowid=next_rowid)
+        try:
+            page_insert_cell(table_name+'.tbl', next_page, cell)
+        except:
+            table_leaf_split_page(table_name+'.tbl', next_page, cell)
+        for filename in indexes:
+            index_colname = filename[len(table_name)+1:-4]
+            i = col_names.index(index_colname)
+            index_dtype= schema[i]
+            index_value= val[i] #index by ord position
+            index_insert(table_name, index_colname, index_dtype, index_value, next_rowid)
+
+
+def delete_from(command):
+    table_name, condition = parse_delete_from(command)
+    cells = WHERE_FUNCTION(table_name, condition)
+    col_names = get_column_names_from_catalog(table_name)[1:]
+    indexes = get_indexes(table_name)
+    for cell in cells:
+        table_delete(table_name, cell)
+        for filename in indexes:
+            index_colname = filename[len(table_name)+1:-4]
+            i = col_names.index(index_colname) #get position
+            index_value = cell['data'][i] #index by ord position
+            index_delete(table_name, index_colname, index_value, cell['rowid'])
+
+
+def update(command):
+    """
+    dict_new_values = {
+    "column1":new_value_to_update_to,
+    "column2":new_value_to_update_to,
+    "column4":new_value_to_update_to,
+    }"""
+    table_name, condition, dict_new_values = parse_delete_from(command)
+    cells = WHERE_FUNCTION(table_name, condition)
+    col_names = get_column_names_from_catalog(table_name)[1:]
+    indexes = get_indexes(table_name)
+    for cell in cells:
+        table_update(table_name, cell, dict_new_values)
+        for filename in indexes:
+            index_colname = filename[len(table_name)+1:-4]
+            if index_colname in dict_new_values:
+                i = col_names.index(index_colname) #get position
+                index_value = cell['data'][i] #index by ord position
+                new_index_value = dict_new_values[index_colname]
+                index_update(table_name, index_colname, index_value, cell['rowid'], new_index_value)
+
+
+#########################################################################
+# TESTING
+
+
 
 
 def page_cell_indx_given_key(pages, index_value):
@@ -1413,17 +1425,6 @@ def get_page_cell_indx(pages, value, page_num):
             else:
                 assert(False)
 
-
-def table_insert(table_name, values):
-    """values would be a list of length self.columns, NULL represented as None"""
-    schema, all_col_data = schema_from_catalog(table_name)
-    next_page, next_rowid = get_next_page_rowid(table_name)
-    cell = table_create_cell(schema, values, False,  rowid=next_rowid)
-    try:
-        page_insert_cell(table_name+'.tbl', next_page, cell)
-    except:
-        table_leaf_split_page(table_name+'.tbl', next_page, cell)
-    return None
 
 
 
@@ -1635,8 +1636,6 @@ def index_leaf_split_page(file_name, split_page_num, cell2insert, index_dtype, i
                 new_parent = index_interior_split_page(file_name, parent_num, middle_cell_binary, rsibling, parent_index)
                 update_page_header(file_name, rsibling, parent = new_parent)
                 update_page_header(file_name, split_page_num, parent = new_parent)
-
-
 
 
 
