@@ -179,11 +179,11 @@ def catalog_add_table(column_dictionary):
     table_name = table[0]
     columns =  column_dictionary[table_name]
     column_names = list(column_dictionary[table_name].keys())
-    insert("davisbase_tables", [table_name])
-    insert("davisbase_columns",[table_name, "rowid", "INT", 1, "NO", 'NO', 'NO' ] )
+    table_insert("davisbase_tables", [table_name])
+    table_insert("davisbase_columns",[table_name, "rowid", "INT", 1, "NO", 'NO', 'NO' ] )
     for col in column_names:
         values=[table_name, col, columns[col]['data_type'].upper(), columns[col]['ordinal_position']+1, columns[col]['is_nullable'].upper(), columns[col]['unique'].upper(), columns[col]['primary_key'].upper()]
-        insert("davisbase_columns", values)
+        table_insert("davisbase_columns", values)
 
 
 
@@ -724,10 +724,11 @@ def page_update_cell(file_name, page_num, cell_indx, cell):
     return None
 
 
+
 def update_page_header(file_name, page_num, rsibling_rchild=None, is_interior=None, parent=None):
-    """Updates the page header. for use in inserts/deletes"""
     is_table = file_name[-4:]=='.tbl'
     is_index=not is_table
+    is_leaf = not is_interior
     file_bytes = load_file(file_name)
     page = load_page(file_bytes, page_num)
     page = bytearray(page)
@@ -735,7 +736,11 @@ def update_page_header(file_name, page_num, rsibling_rchild=None, is_interior=No
         assert(len(file_bytes)/PAGE_SIZE>=rsibling_rchild)
         page[6:10] = struct.pack(endian+'i', rsibling_rchild)
     if is_interior is not None:
-        is_leaf = not is_interior
+        if page[0] in [5,13]:
+            is_table = True
+        else:
+            is_table = False
+
         if is_table and is_interior:
             page[0:1] = b'\x05'
         elif is_table and is_leaf:
@@ -926,8 +931,8 @@ def index_insert_cell_in_page(file_name, page_num, cell, cell_indx):
     page = bytearray(page)
 
     num_cells = struct.unpack(endian+'h', page[2:4])[0]
-    if cell_index = num_cells: #add to end of page
-        page_insert_ce(file_name, page_number, cell)
+    if cell_index == num_cells: #add to end of page
+        page_insert_cell(file_name, page_number, cell)
         return None
 
     assert(cell_indx<=num_cells-1)#index starts at 0
@@ -1201,9 +1206,11 @@ def page_delete_cells_on_and_after(file_name, page_num, cell_indx):
     cell_top_loc, cell_bot_loc = get_cell_indices(page, cell_indx)
     dis = cell_bot_loc - cell_content_area_start
     page[cell_content_area_start:cell_bot_loc] = b'\x00'*dis
-    page[16+2*cell_indx:16+2*num_cells] = b'\x00'*(num_cells-cell_indx)
+    page[16+2*cell_indx:16+2*num_cells] = b'\x00'*2*(num_cells-cell_indx)
     #update num of cells
-    page[2:4] = struct.pack(endian+'h', num_cells-(cell_indx+1))
+    page[2:4] = struct.pack(endian+'h', cell_indx)
+    #change cell start area
+    page[4:6] = struct.pack(endian+'h', cell_content_area_start+dis)
     save_page(file_name, page_num, page)
     assert(len(page)==PAGE_SIZE) #ensure page is same size
     return (num_cells - 1) == 0
@@ -1234,6 +1241,7 @@ def table_interior_split_page(file_name, split_page_num, cell2insert, new_rightm
     rightmost_child_page_left = cells[middle_cell]['left_child_page']
 
 
+
     if parent_num==-1: #ROOT CONDITION #children will also be interior nodes
         rchild_num = write_new_page(table_name, is_table, is_interior, new_rightmost_page, split_page_num)
         lchild_num = write_new_page(table_name, is_table, is_interior, rightmost_child_page_left, split_page_num)
@@ -1247,14 +1255,15 @@ def table_interior_split_page(file_name, split_page_num, cell2insert, new_rightm
         page_insert_cell(file_name, lchild_num, cells2copy)
 
         cells2copy=[]
-        for i in range(middle_cell, num_cells):#update child to point header to rchild
-        cells2copy.append(cells[i]['cell_binary'])
+        for i in range(middle_cell+1, num_cells):#update child to point header to rchild
+            cells2copy.append(cells[i]['cell_binary'])
             update_page_header(file_name, cells[i]['left_child_page'], parent=rchild_num)
         update_page_header(file_name, rightmost_child_page_right, parent=rchild_num)
         #Copy cells into right child
         page_insert_cell(file_name, rchild_num, cells2copy)
-
+        page_insert_cell(file_name, rchild_num, cell2insert)
         #Update the pointers in the new, root node, then delete all but middle cell
+
         page_delete_cells_on_and_after(file_name, split_page_num, 0)
         page_insert_cell(file_name, split_page_num, middle_cell_binary)
         update_cell_lpointer(file_name, split_page_num, 0, lchild_num)
@@ -1265,14 +1274,16 @@ def table_interior_split_page(file_name, split_page_num, cell2insert, new_rightm
         rsibling = write_new_page(table_name, is_table, is_interior, rightmost_child_page_right, parent_num)
 
         cells2copy=[]
-        for i in range(middle_cell, num_cells): #Copy cells into right child
+        for i in range(middle_cell+1, num_cells): #Copy cells into right child update child pointers
             cells2copy.append(cells[i]['cell_binary'])
-            update_page_header(file_name, insert_order[i]['left_child_page'], parent=rsibling)
+            update_page_header(file_name, cells[i]['left_child_page'], parent=rsibling)
         update_page_header(file_name, rightmost_child_page_right, parent=rsibling)
-        page_insert_cell(file_name, rchild_num, cells2copy)
 
-        #middle_cell_binary = table_create_cell([], [], True, left_child_page=split_page_num,  rowid=middle_rowid)
+        page_insert_cell(file_name, rsibling, cells2copy)
+        page_insert_cell(file_name, rsibling, cell2insert)
         page_delete_cells_on_and_after(file_name, split_page_num, middle_cell)
+
+        middle_cell_binary = table_create_cell([], [], True, left_child_page=split_page_num,  rowid=middle_rowid)
         update_page_header(file_name, split_page_num, rsibling_rchild=rightmost_child_page_left)
 
         if pages[parent_num]['rightmost_child_page']==split_page_num:
@@ -1284,6 +1295,7 @@ def table_interior_split_page(file_name, split_page_num, cell2insert, new_rightm
             update_page_header(file_name, rsibling, parent = new_parent)
             update_page_header(file_name, split_page_num, parent = new_parent)
         return rsibling
+
 
 #could put these two together, but I dont care
 def table_leaf_split_page(file_name, split_page_num, cell2insert):
@@ -1321,9 +1333,10 @@ def table_leaf_split_page(file_name, split_page_num, cell2insert):
         page_insert_cell(file_name, rchild_num, cell2insert)
 
         middle_cell_binary = table_create_cell([], [], True, left_child_page=lchild_num,  rowid=middle_rowid)
-        update_page_header(file_name, split_page_num, rsibling_rchild=rchild_num, is_interior=True)
         page_delete_cells_on_and_after(file_name, split_page_num, 0)
         page_insert_cell(file_name, split_page_num, middle_cell_binary)
+        update_page_header(file_name, split_page_num, rsibling_rchild=rchild_num, is_interior=True)
+
 
     else: #Non-root ->propagate upward
         rsibling = write_new_page(table_name, is_table, is_interior, right_sibling_page, parent_num)
@@ -1401,7 +1414,16 @@ def get_page_cell_indx(pages, value, page_num):
                 assert(False)
 
 
-
+def table_insert(table_name, values):
+    """values would be a list of length self.columns, NULL represented as None"""
+    schema, all_col_data = schema_from_catalog(table_name)
+    next_page, next_rowid = get_next_page_rowid(table_name)
+    cell = table_create_cell(schema, values, False,  rowid=next_rowid)
+    try:
+        page_insert_cell(table_name+'.tbl', next_page, cell)
+    except:
+        table_leaf_split_page(table_name+'.tbl', next_page, cell)
+    return None
 
 
 
@@ -1419,7 +1441,7 @@ def index_insert(table_name, column_name, index_dtype, index_value, rowid):
                 ->if no room -> create_cell -> insert in left child"""
     file_name = table_name+'_'+column_name+'.ndx'
     pages = read_all_pages_in_file(file_name)
-
+    pdb.set_trace()
     page_num, cell_indx = page_cell_indx_given_key(pages, index_value)
     page = pages[page_num]
 
@@ -1446,8 +1468,6 @@ def index_insert(table_name, column_name, index_dtype, index_value, rowid):
 
 
 
-
-
 def index_interior_split_page(file_name, split_page_num, cell2insert, new_rightmost_page, cell_index):
     pages = read_all_pages_in_file(file_name)
     values = pages[split_page_num]
@@ -1468,16 +1488,16 @@ def index_interior_split_page(file_name, split_page_num, cell2insert, new_rightm
     i=0
     while len(insert_order)!=len(cells)+1:
         if cell_index==i:
-            insert_order.append(cell2insert['cell_binary'])
+            insert_order.append(cell2insert)
         else:
-            insert_order.append(cells[i]['cell_binary'])
+            insert_order.append(cells[i])
             i+=1
 
     middle_cell_binary = insert_order[middle_cell]['cell_binary']
     middle_index = insert_order[middle_cell]['index_value']
     rightmost_child_page_right = new_rightmost_page
-
     rightmost_child_page_left = insert_order[middle_cell]['left_child_page']
+    cells2copy = [cell['cell_binary'] for cell in insert_order]
 
     if parent_num==-1: #ROOT CONDITION #children will also be interior nodes
         rchild_num = write_new_page(table_name, is_table, is_interior, new_rightmost_page, split_page_num)
@@ -1486,19 +1506,18 @@ def index_interior_split_page(file_name, split_page_num, cell2insert, new_rightm
         for i in range(middle_cell): #Copy cells into left child
             update_page_header(file_name, insert_order[i]['left_child_page'], parent=lchild_num) #update child to point header to lchild
         update_page_header(file_name, rightmost_child_page_left, parent=lchild_num)#update parent of rightmost
-        page_insert_cell(file_name, lchild_num, insert_order[:middle_cell])
+        page_insert_cell(file_name, lchild_num, cells2copy[:middle_cell])
 
         for i in range(middle_cell, num_cells): #Copy cells into right child   #splitting the interior nodes,  the middle cell is not redundant in children
             update_page_header(file_name, insert_order[i]['left_child_page'], parent=rchild_num)
         update_page_header(file_name, rightmost_child_page_right, parent=rchild_num)
-        page_insert_cell(file_name, rchild_num, insert_order[middle_cell:])
+        page_insert_cell(file_name, rchild_num, cells2copy[middle_cell+1:])
 
-        page_delete_cell(file_name, rchild_num, 0)
 
         page_delete_cells_on_and_after(file_name, split_page_num, 0)
         page_insert_cell(file_name, split_page_num, middle_cell_binary)
-        update_page_header(file_name, split_page_num, rsibling_rchild=rchild_num)
         update_cell_lpointer(file_name, split_page_num, 0, lchild_num)
+        update_page_header(file_name, split_page_num, rsibling_rchild=rchild_num)
         return rchild_num  #return so we can update headers of pages that couldnt fit in the old page
 
     else:
@@ -1509,18 +1528,17 @@ def index_interior_split_page(file_name, split_page_num, cell2insert, new_rightm
         page_delete_cells_on_and_after(file_name, split_page_num, 0)
         for i in range(middle_cell): #Copy cells into right sibling
             update_page_header(file_name, insert_order[i]['left_child_page'], parent=rsibling)
-        page_insert_cell(file_name, rsibling, insert_order[middle_cell:])
+        page_insert_cell(file_name, rsibling, cells2copy[middle_cell:])
 
         for i in range(middle_cell, num_cells): #Copy cells into right sibling
             update_page_header(file_name, insert_order[i]['left_child_page'], parent=rsibling)
-        page_insert_cell(file_name, rsibling, insert_order[middle_cell:])
-        page_delete_cell(file_name, rsibling, 0)
+        page_insert_cell(file_name, rsibling, cells2copy[middle_cell+1:])
 
+        parent_page = pages[parent_num]
+        parent_cells = parent_page['cells']
         if pages[parent_num]['rightmost_child_page']==split_page_num:
             update_page_header(file_name, parent_num, rsibling_rchild=rsibling)
 
-        parent_page = read_cells_in_page(file_bytes, parent_num)
-        parent_cells = parent_page['cells']
         for i, cell in enumerate(parent_cells):
             if cell['index_value'] >  middle_index:
                 parent_index = i
@@ -1528,7 +1546,6 @@ def index_interior_split_page(file_name, split_page_num, cell2insert, new_rightm
                 break
             elif i==len(parent_cells)-1:
                 parent_index = len(parent_cells)
-
 
         if parent_page['available_bytes']/PAGE_SIZE<0.5:
             new_parent = index_interior_split_page(file_name, parent_num, middle_cell_binary, rsibling, parent_index)
@@ -1544,8 +1561,6 @@ def index_interior_split_page(file_name, split_page_num, cell2insert, new_rightm
         return rsibling
 
 
-
-#could put these two together, but I dont care
 def index_leaf_split_page(file_name, split_page_num, cell2insert, index_dtype, index2insert):
     file_bytes = load_file(file_name)
     values = read_cells_in_page(file_bytes, split_page_num)
@@ -1571,16 +1586,18 @@ def index_leaf_split_page(file_name, split_page_num, cell2insert, index_dtype, i
 
     middle_cell_binary = insert_order[middle_cell]
     middle_index = insert_order[middle_cell]['index_value']
+    cells2copy = [cell['cell_binary'] for cell in insert_order]
 
     if parent_num==-1: #IS ROOT ->create two children
         rchild_num = write_new_page(table_name, is_table, False, -1, split_page_num)
         lchild_num = write_new_page(table_name, is_table, False, rchild_num, split_page_num)
-        page_insert_cell(file_name, lchild_num, insert_order[:middle_cell])
-        page_insert_cell(file_name, rchild_num, insert_order[middle_cell+1:])
+        page_insert_cell(file_name, lchild_num, cells2copy[:middle_cell])
+        page_insert_cell(file_name, rchild_num, cells2copy[middle_cell+1:])
         page_delete_cells_on_and_after(file_name, split_page_num, 0)
         middle_cell_binary = struct.pack(endian+'i', lchild_num) + middle_cell_binary
-        update_page_header(file_name, split_page_num, rsibling_rchild=rchild_num, is_interior=True)
         page_insert_cell(file_name, split_page_num, middle_cell_binary)
+        update_page_header(file_name, split_page_num, rsibling_rchild=rchild_num, is_interior=True)
+
 
 
     else: #Non-root ->propagate upward
@@ -1588,9 +1605,9 @@ def index_leaf_split_page(file_name, split_page_num, cell2insert, index_dtype, i
         rsibling = write_new_page(table_name, is_table, is_interior, right_sibling_page, parent_num)
 
         page_delete_cells_on_and_after(file_name, split_page_num, 0)
-        page_insert_cell(file_name, lchild_num, insert_order[:middle_cell])
+        page_insert_cell(file_name, lchild_num, cells2copy[:middle_cell])
         update_page_header(file_name, split_page_num, rsibling_rchild=rsibling)
-        page_insert_cell(file_name, rchild_num, insert_order[middle_cell+1:])
+        page_insert_cell(file_name, rchild_num, cells2copy[middle_cell+1:])
         middle_cell_binary = struct.pack(endian+'i', split_page_num) + middle_cell_binary
 
         parent_page = read_cells_in_page(file_bytes, parent_num)
@@ -1608,15 +1625,14 @@ def index_leaf_split_page(file_name, split_page_num, cell2insert, index_dtype, i
                 parent_index = len(parent_cells)
 
         if parent_page['available_bytes']/PAGE_SIZE<0.5:
-            new_parent = index_interior_split_page(file_name, parent_num, middle_cell_binary, rsibling, middle=True, index2insert=parent_index)
+            new_parent = index_interior_split_page(file_name, parent_num, middle_cell_binary, rsibling, parent_index)
             update_page_header(file_name, rsibling, parent = new_parent)
             update_page_header(file_name, split_page_num, parent = new_parent)
-            return None
         else:
             try:
                 index_insert_cell_in_page(file_name, parent_num, middle_cell_binary, parent_index)
             except:
-                new_parent = index_interior_split_page(file_name, parent_num, middle_cell_binary, rsibling, middle=True, index2insert=parent_index)
+                new_parent = index_interior_split_page(file_name, parent_num, middle_cell_binary, rsibling, parent_index)
                 update_page_header(file_name, rsibling, parent = new_parent)
                 update_page_header(file_name, split_page_num, parent = new_parent)
 
