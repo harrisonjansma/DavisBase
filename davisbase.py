@@ -55,8 +55,6 @@ def check_input(command):
 
 
 
-
-
 def init():
     if os.path.exists('davisbase_columns.tbl'):
         pass
@@ -102,7 +100,6 @@ def init():
                 print("Remaining space in page:", page_available_bytes(file_bytes, 0))
 
 
-
 def help():
     print("DavisBase supported commands.")
     print("##########################################")
@@ -120,7 +117,7 @@ def help():
 
 
 
-def initialize_file(table_name, is_table):
+def initialize_file(table_name, is_table, is_interior=False, rchild=0):
     """Creates a file and writes the first, empty page (root)"""
     if is_table:
         file_type = ".tbl"
@@ -130,7 +127,7 @@ def initialize_file(table_name, is_table):
         os.remove(table_name+file_type)
     with open(table_name+file_type, 'w+') as f:
         pass
-    write_new_page(table_name, is_table, False, 0, -1)
+    write_new_page(table_name, is_table, is_interior, rchild, -1)
     return None
 
 
@@ -394,7 +391,6 @@ def index_payload_to_values(payload):
         i+=4
 
     return indx_value, rowid_values
-
 
 def table_create_cell(schema, value_list, is_interior, left_child_page=None,  rowid=None):
     """
@@ -840,6 +836,10 @@ def read_cells_in_page(file_bytes, page_num):
     else:
         result['right_sibling_page'] = parent_page = struct.unpack(endian+'i', page[6:10])[0]
     result['cells']=data
+    if is_table:
+        result['rowids'] = [i['rowid'] for i in data]
+    else:
+        result['index_values'] = [i['index_value'] for i in data]
     return result
 
 
@@ -866,6 +866,25 @@ def read_all_pages_in_file(file_name):
     data = []
     for page_num in range(num_pages):
         data.append(read_cells_in_page(file, page_num))
+    for page in data:
+        if page['is_leaf']:
+            if page['right_sibling_page']!=-1:
+                if data[page['right_sibling_page']]['parent_page']==page['parent_page']:
+                    data[page['right_sibling_page']]['left_sibling_page'] = page['page_number']
+        else:
+            for i, cell in enumerate(page['cells']):
+                child_page = cell['left_child_page']
+                if i!=0:
+                    data[child_page]['left_sibling_page']=page['cells'][i-1]['left_child_page']
+                if i+1!=len(page['cells']):
+                    data[child_page]['right_sibling_page']=page['cells'][i+1]['left_child_page']
+                else:
+                    data[child_page]['right_sibling_page']=page['rightmost_child_page']
+
+            data[page['rightmost_child_page']]['left_sibling_page']=page['cells'][-1]['left_child_page']
+            data[page['rightmost_child_page']]['right_sibling_page']=-1
+
+
     return data
 
 
@@ -966,9 +985,11 @@ def index_insert_cell_in_page(file_name, page_num, cell, cell_indx):
     return (num_cells - 1) == 0
 
 
-def print_it(file_name, page_format=False, limit=None):
+def print_it(file_name, page_format=False, limit=None, pages=None):
     """Used for testing, prints all contents of a table/index in page form or as list"""
-    pages  =read_all_pages_in_file(file_name)
+    if pages ==None:
+        pages  =read_all_pages_in_file(file_name)
+
     print(file_name[:-4])
     if page_format:
         for page in pages:
@@ -1141,6 +1162,30 @@ def update(command):
                 index_update(table_name, index_colname, index_value, cell['rowid'], new_index_value)
 
 
+def drop_table(command):
+    table_name = parse_drop_table(command)
+    if os.path.exists(table_name+".tbl"):
+        os.remove(table_name+".tbl")
+        _, rows = schema_from_catalog(table_name, with_rowid=True)
+        rowids = [row['rowid'] for row in rows]
+        table_delete('davisbase_columns.tbl', rowids)
+
+        data = read_all_pages_in_file('davisbase_tables.tbl')
+        for page in data:
+            if not page['is_leaf']:
+                continue
+            for cell in page['cells']:
+                if table_name==cell['data'][0].lower():
+                    rowids = [cell['rowid']]
+                    break
+        table_delete('davisbase_tables.tbl', rowids)
+        for index in get_indexes(table_name):
+            os.remove(index)
+    else:
+        print("Table \"{}\" does note exist.".format(table_name))
+
+
+
 #########################################################################
 # TESTING
 
@@ -1217,8 +1262,6 @@ def page_delete_cells_on_and_after(file_name, page_num, cell_indx):
     save_page(file_name, page_num, page)
     assert(len(page)==PAGE_SIZE) #ensure page is same size
     return (num_cells - 1) == 0
-
-
 
 
 def table_interior_split_page(file_name, split_page_num, cell2insert, new_rightmost_page):
@@ -1670,8 +1713,288 @@ def delete(table_name, rowid):
 
 
 
+
+#########################################################
+#TABLE DELETE FUNCTIONS
+
+def table_delete(file_name, rowids):
+    pages = read_all_pages_in_file(file_name)
+    for rowid in rowids:
+        page_num=0
+        table_delete_recursion(pages, page_num, rowid)
+    page_dict_to_file(file_name, pages)
+
+def delete_from_page_dict(pages, page_num, indx):
+    page = pages[page_num]
+    page['available_bytes']+=len(page['cells'][indx]['cell_binary']) #cell_binary?
+    page['num_cells']-=1
+    del page['rowids'][indx]
+    del page['cells'][indx]
+    return pages
+
+def insert_to_page_dict(pages, page_num, cell, indx):
+    page = pages[page_num]
+    page['available_bytes']-=len(cell['cell_binary'])
+    page['num_cells']+=1
+    if indx==0:
+        page['rowids'] = [cell['rowid']] + page['rowids']
+        page['cells'] = [cell] + page['cells']
+    elif indx+1<page['num_cells']:
+        page['rowids'] = page['rowids'][:indx] + [cell['rowid']] + page['rowids'][indx:]
+        page['cells'] = page['cells'][:indx] + [cell] + page['cells'][indx:]
+    else:
+        page['rowids'].append(cell['rowid'])
+        page['cells'].append(cell)
+    return pages
+
+def update_cell_binary(cell_binary, rowid=None, left_child=None):
+    cell_binary = bytearray(cell_binary)
+    if left_child!=None:
+        cell_binary[:4] = struct.pack(endian+'i', left_child)
+    if rowid!=None:
+        cell_binary[4:8] = struct.pack(endian+'i', rowid)
+    return cell_binary
+
+def fix_parent_pointer(pages, parent_page, id2fix, left=True):
+    page = pages[parent_page]
+    for i, id in enumerate(page['rowids']):
+        if left:
+            if id > id2fix:
+                page['rowids'][i]=id2fix
+                page['cells'][i]['cell_binary']=update_cell_binary(page['cells'][i]['cell_binary'], rowid=id2fix)
+                break
+        else:
+            if id > id2fix:
+                page['rowids'][i-1]=id2fix
+                page['cells'][i-1]['cell_binary']=update_cell_binary(page['cells'][i-1]['cell_binary'], rowid=id2fix)
+                break
+    return None
+
+def steal_sibling_cell(pages, page_num, left=True):
+    page = pages[page_num]
+    if left:
+        lsib = pages[page['left_sibling_page']]
+        cell = lsib['cells'][-1]
+        insert_to_page_dict(pages, page_num, cell, 0)
+        delete_from_page_dict(pages, lsib['page_number'], lsib['num_cells']-1)
+        return cell['rowid']
+    else:
+        rsib = pages[page['right_sibling_page']]
+        cell = rsib['cells'][0]
+        insert_to_page_dict(pages, page_num, cell, page['num_cells'])
+        delete_from_page_dict(pages, rsib['page_number'], 0)
+        return cell['rowid']
+
+def try_borrowing(pages, borrower_page):
+    page = pages[borrower_page]
+    parent = page['parent_page']
+    if 'left_sibling_page' in page:
+        lsib = pages[page['left_sibling_page']]
+        steal_size = len(lsib['cells'][-1]['cell_binary'])
+        if lsib['num_cells']>2:
+            id2fix=steal_sibling_cell(pages, borrower_page, left=True)
+            fix_parent_pointer(pages, page['parent_page'], id2fix, left=True)
+            return None #done
+        else:
+            return 'left' #MERGE
+    elif page['right_sibling_page']!=-1 and pages[page['right_sibling_page']]['parent_page']==parent:
+        rsib = pages[page['right_sibling_page']]
+        steal_size = len(rsib['cells'][0]['cell_binary'])
+        if rsib['num_cells']>2:
+            id2fix=steal_sibling_cell(pages, borrower_page, left=False)
+            fix_parent_pointer(pages, page['parent_page'], id2fix+1, left=False)
+            return None #done
+        else:
+            return 'right' #MERGE
+    else:
+        return 'right'
+
+def delete_dict(pages, page_num, rowid):
+    page = pages[page_num]
+    if rowid in page['rowids']:
+        indx = page['rowids'].index(rowid)
+        pages = delete_from_page_dict(pages, page_num, indx)
+
+        if page['num_cells']<2 and page['parent_page']!=-1:
+            return try_borrowing(pages, page_num) #returns 'left' pr 'right'
+        else:
+            return None #dont need to borrow not empty
+    else:
+        return None
+
+def merge_children(pages, page_num, child_page_num, left=True):
+    page = pages[page_num]
+    pdb.set_trace()
+    page_children = [i['left_child_page'] for i in pages[page_num]['cells']]
+    child_page = pages[child_page_num]
+
+    if left:
+        lsib = pages[child_page['left_sibling_page']]
+        id2del = page['cells'][page_children.index(lsib['page_number'])]['rowid']
+        if not lsib['is_leaf']: #update parent of downstream
+            for cell in lsib['cells']:
+                pages[cell['left_child_page']]['parent_page'] = child_page_num
+            pages[lsib['rightmost_child_page']]['parent_page'] = child_page_num
+            middle_cell = table_create_cell([], [], True, left_child_page=lsib['rightmost_child_page'],  rowid=id2del)
+            lsib['cells'] = lsib['cells']+middle_cell
+            lsib['rowids'] = lsib['rowids']+id2del
+
+        child_page['cells'] = lsib['cells']+child_page['cells']
+        child_page['rowids'] = lsib['rowids']+child_page['rowids']
+        child_page['num_cells'] = lsib['num_cells']+child_page['num_cells']
+        child_page['available_bytes'] = lsib['available_bytes']-(PAGE_SIZE - child_page['available_bytes'])
+        child_page['right_sibling_page'] = lsib['right_sibling_page']
+        pages[child_page['right_sibling_page']]['left_sibling_page'] = child_page_num
+        lsib['deleted'] = True
+
+        return id2del
+
+    else:
+        rsib = pages[child_page['right_sibling_page']]
+        id2del = page['cells'][page_children.index(child_page_num)]['rowid']
+        if not rsib['is_leaf']: #update parent of downstream
+            for cell in rsib['cells']:
+                pages[cell['left_child_page']]['parent_page'] = child_page_num
+            pages[rsib['rightmost_child_page']]['parent_page'] = child_page_num
+            middle_cell = table_create_cell([], [], True, left_child_page=rsib['rightmost_child_page'],  rowid=id2del)
+            child_page['cells'] = child_page['cells']+middle_cell
+            child_page['rowids'] = child_page['rowids']+id2del
+
+        child_page['cells'] = child_page['cells'] + rsib['cells']
+        child_page['rowids'] = child_page['rowids'] + rsib['rowids']
+        child_page['num_cells'] = child_page['num_cells'] + rsib['num_cells']
+        child_page['available_bytes'] = rsib['available_bytes']-(PAGE_SIZE - child_page['available_bytes'])
+        child_page['left_sibling_page'] = rsib['left_sibling_page']
+        pages[child_page['left_sibling_page']]['right_sibling_page'] = child_page_num
+        rsib['deleted'] = True
+        return id2del
+
+    if page['parent_page']==-1 and page['num_cells']==1:
+        child_page['parent_page'] = -1
+
+def table_delete_recursion(pages, page_num, rowid):
+    page = pages[page_num]
+    if page['is_leaf']:
+
+        return delete_dict(pages, page_num, rowid) #returns 'left' pr 'right' or None
+    else:
+
+        for  i, cell in enumerate(page['cells']):
+            if cell['rowid'] > rowid:
+                child_page = cell['left_child_page']
+                merge_child = table_delete_recursion(pages, child_page, rowid)
+                break
+            elif i+1 == len(page['cells']):
+                child_page = page['rightmost_child_page']
+                merge_child = table_delete_recursion(pages, child_page, rowid)
+                break
+            else:
+                continue
+
+        if merge_child is None: #all clear no merges necessary
+            return None
+
+        elif merge_child=='left': #merge left
+            pdb.set_trace()
+            if page['parent_page']==-1 and page['num_cells']==1: #root condition
+                merge_children(pages, page_num, child_page, left=True)
+                page['deleted'] = True #remove the root
+                page['parent_page'] = -13 #so ican find the root later
+            else:
+                id2del = merge_children(pages, page_num, child_page, left=True)
+                return delete_dict(pages, page_num, id2del)
+
+        elif merge_child=='right': #parent of a leaf node
+            if page['parent_page']==-1 and page['num_cells']==1: #root condition
+                merge_children(pages, page_num, child_page, left=False)
+                page['deleted'] = True #remove the root
+                page['parent_page'] = -13 #so ican find the root later
+            else:
+                id2del = merge_children(pages, page_num, child_page, left=False)
+                return delete_dict(pages, page_num, id2del)
+        else:
+            assert(False)
+
+def copy_page(file_name, pages, page_number, parent, i=None):
+    page = pages[page_number]
+    table_name = file_name[:-4]
+    is_table = page['is_table']
+    is_interior = not page['is_leaf']
+    if is_interior:
+        rsibling_rchild = page['rightmost_child_page']
+    else:
+        rsibling_rchild = page['right_sibling_page']
+    if i==None: #need to keep track of fileoffset (first page is initialize already)
+        i=0
+
+    write_new_page(table_name, is_table, is_interior, rsibling_rchild, parent)
+
+    if page['num_cells']>1:
+        cells2insert = [j["cell_binary"] for j in page['cells']]
+    else:
+        cells2insert = page['cells'][0]['cell_binary']
+
+    page_insert_cell(file_name, i, cells2insert)
+    i+=1
+    if is_interior:
+        cells = sorted(page['cells'], key=lambda x: x['left_child_page'])
+        children = [j["left_child_page"] for j in cells]+[page['rightmost_child_page']]
+        for child in children:
+            if 'deleted' not in pages[child]:
+                copy_page(file_name, pages, child, page_number, i=i)
+                i+=1
+            else:
+                continue
+
+
+def page_dict_to_file(file_name, pages):
+    table_name = file_name[:-4]
+    if file_name[-4:]=='.tbl':
+        is_table = True
+    else:
+        is_table=False
+    for page in pages:
+        if page['parent_page']==-1:
+            root_node = page['page_number']
+            break
+
+    os.remove(file_name)
+    with open(file_name, 'w+') as f:
+        pass
+    copy_page(file_name, pages, root_node, -1)
+    return None
+
+
+
+MIN_FILL_RATIO = 0.2
+MAX_FILL_RATIO = 0.7
+
+###############################################################################################
+
+
+
+
+def get_predecessor(pages, page_num):
+    page = pages[page_num]
+    while not page['is_leaf']:
+        page_num = page['rightmost_child_page']
+        page = pages[page_num]
+    return page['cells'][-1], page_num
+
+
+
+
+
+
+
+
+
 def update(table_name, new_values):
     return None
+
+
+
+
 
 
 
@@ -1681,35 +2004,9 @@ def update(table_name, new_values):
 
 
 
-def table_merge_pages(file_names, parent_num):
-    return None
-
-def index_merge_pages(file_names, parent_num):
-    return None
-
-def table_merge_pages(file_bytes, parent_num, lchild_num, rchild_num):
-    return None
-
-
-def catalog_drop_table(table_name):
-    """
-    Deletes table_name.tbl, check if index exists (if so, delete index), update metadata remove all cells related to table_name
-
-    Returns:
-    bool: success_flag
-    """
-    return None
 
 
 
-def drop_table(command):
-    table_name = parse_drop_table(command)
-    if check_table_exists(table_name):
-        success = delete_all_table_data(table_name)
-        if not success:
-            print("temporary error")
-    else:
-        print("Table \"{}\" does note exist.".format(table_name))
 
 
 def show_tables():
@@ -1835,16 +2132,6 @@ def parse_drop_table(command):
     else:
         print("Enter correct query")
     return tablename
-
-
-def delete_all_table_data(table_name):
-    """
-    Deletes table_name.tbl, check if index exists (if so, delete index), update metadata remove all cells related to table_name
-
-    Returns:
-    bool: success_flag
-    """
-    return False
 
 
 
@@ -2006,104 +2293,8 @@ def check_valid(file_name, pages=None, page_num=0, is_table=None):
 
 #############################################################################
 PAGE_SIZE = 512
-BYTE_ORDER = sys.byteorder
-if BYTE_ORDER=='big':
-    endian = '>'
-elif BYTE_ORDER=='little':
-    endian = '<'
-
-if __name__== "__main__":
-    init()
-    print("DavisBase version 0.00.1 2019-11-21")
-    print("Enter \"help;\" for usage hints.")
-    exit_command = False
-    while not exit_command:
-        command = input("davisbase> ").lower()
-        exit_command = check_input(command)
-
-#######################################################################################
-def table_delete(file_name, pages, rowid, page_num=0):
-    leaf_page, leaf_cell_indx = page_cell_indx_given_key(pages, rowid)
-    if leaf_cell_indx!=len(pages[leaf_page]['cells']):
-        page_delete_cell(file_name, leaf_page, leaf_cell_indx)
-    else: #rowid not in table
-        return
-
-    pages = read_all_pages_in_file(file_name)
-
-
-
-def table_delete_recursion(pages, page_num, rowid):
-    page_cells = [i['rowid'] for i in page['cells']]
-    if page['is_leaf']:
-        if rowid in page_cells:
-
-            return
-        else:
-            return
-    else:
-        if rowid in page_cells:
-            cell_indx = page_cells.index(rowid)
-            child_page = page['cells'][cell_indx]['left_child_page']
-            predecessor = get_predecessor(pages, child_page)
-            table_delete(pages, predecessor)
-            page_update_cell(file_name, page_num, cell_indx, predecessor)
-
-
-def get_predecessor(pages, page_num):
-    page = pages[page_num]
-    while not page['is_leaf']:
-        page_num = page['rightmost_child_page']
-        page = pages[page_num]
-    return page['cells'][-1], page_num
-
-
-def try_borrowing(file_name, pages, borrower_page):
-    parent_page_num = pages[borrower_page]['parent_page']
-    parent_page = pages[parent_page_num]
-    parent_cells = [i['rowid'] for i in parent_page['cells']]
-
-    borrower_indx = parent_cells.index(borrower_page)
-    num_cells = len(parent_cells)
-
-    lsib = borrower_indx-1
-    if lsib>=0:
-        lsib = parent_page['cells'][lsib]['left_child_page']
-        if len(pages[lsib]['cells'])>1:
-            cell = pages[lsib]['cells'][-1]
-            cell_rowid = cell['rowid']
-            cell_binary = cell['cell_binary']
-            index_insert_cell_in_page(file_name, borrower_page, cell_binary, 0)
-            page_delete_cell(file_name, page_num, len(pages[lsib]['cells'])-1)
-            update_cell_lpointer(file_name, parent_page_num, borrower_indx, rowid=cell_rowid)
-            return
-
-    rsib = borrower_indx+1
-    elif rsib<len(parent_cells):
-        rsib = parent_page['cells'][rsib]['left_child_page']
-        if len(pages[rsib]['cells'])>1:
-            cell = pages[lsib]['cells'][0]
-            cell_rowid = cell['rowid']
-            cell_binary = cell['cell_binary']
-            index_insert_cell_in_page(file_name, borrower_page, cell_binary, len(pages[borrower_page]['cells']))
-            page_delete_cell(file_name, rsib, 0)
-            update_cell_lpointer(file_name, parent_page_num, borrower_indx+1, rowid=cell_rowid)
-            return
-    else:
-        assert(False)
-
-
-
-
-
-
-
-
-
-
-
-#############################################################################
-PAGE_SIZE = 512
+MIN_FILL_RATIO = 0.2
+MAX_FILL_RATIO = 0.7
 BYTE_ORDER = sys.byteorder
 if BYTE_ORDER=='big':
     endian = '>'
