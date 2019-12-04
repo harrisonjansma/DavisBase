@@ -2,7 +2,9 @@ import os
 import struct
 import sys
 from datetime import datetime, time
+import sqlparse
 import operator
+
 import re
 import pdb
 
@@ -11,9 +13,8 @@ import pdb
 def check_input(command):
     if len(command)==0:
         pass
-
     elif command[-1]!=";":
-        print("All commands end with semicolon.")
+        return command
 
     elif command == "help;":
         help()
@@ -34,10 +35,10 @@ def check_input(command):
         insert_into(command)
 
     elif command[0:len("delete ")] == "delete ":
-        insert_into(command)
+        delete_from(command)
 
     elif command[0:len("update ")] == "update ":
-        insert_into(command)
+        update(command)
 
     elif command[0:len("select ")] == "select ":
         query(command)
@@ -45,8 +46,6 @@ def check_input(command):
     elif command == "exit;":
         return True
 
-    elif command == "test;":
-        return True
 
     else:
         print("Command \"{}\" not recognized".format(command))
@@ -1129,16 +1128,15 @@ def insert_into(command):
 
 def delete_from(command):
     table_name, condition = parse_delete_from(command)
-    cells = WHERE_FUNCTION(table_name, condition)
+    rowids = WHERE_FUNCTION(table_name, condition)
     col_names = get_column_names_from_catalog(table_name)[1:]
     indexes = get_indexes(table_name)
-    for cell in cells:
-        table_delete(table_name, cell)
-        for filename in indexes:
-            index_colname = filename[len(table_name)+1:-4]
-            i = col_names.index(index_colname) #get position
-            index_value = cell['data'][i] #index by ord position
-            index_delete(table_name, index_colname, index_value, cell['rowid'])
+    table_delete(table_name, rowids)
+    """for filename in indexes:
+        index_colname = filename[len(table_name)+1:-4]
+        i = col_names.index(index_colname) #get position
+        index_value = cell['data'][i] #index by ord position
+        index_delete(table_name, index_colname, index_value, cell['rowid'])"""
 
 
 def update(command):
@@ -1184,6 +1182,11 @@ def drop_table(command):
             os.remove(index)
     else:
         print("Table \"{}\" does note exist.".format(table_name))
+
+
+
+
+
 
 
 
@@ -2317,6 +2320,17 @@ if __name__== "__main__":
     print("DavisBase version 0.00.1 2019-11-21")
     print("Enter \"help;\" for usage hints.")
     exit_command = False
+    command = ''
     while not exit_command:
-        command = input("davisbase> ").lower()
-        exit_command = check_input(command)
+        line = input("davisbase> ").lower()
+        if len(command)==0:
+            command+=line
+        else:
+            command+=" "+line
+        out = check_input(command)
+        if type(out)==bool:
+            exit_command = True
+        elif out==None:
+            command=''
+        else:
+            continue
