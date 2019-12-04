@@ -3,6 +3,8 @@ import struct
 import sys
 from datetime import datetime, time
 import sqlparse
+import operator
+
 import re
 import pdb
 
@@ -2194,6 +2196,15 @@ def update(command):
 ##########################################################################
 #DQL FUNCTIONS
 
+def get_operator_fn(op):
+    return {
+    '=' : operator.eq,
+    '<' : operator.lt,
+    '>' : operator.gt,
+    '>=' : operator.ge,
+    '<=' : operator.le,
+    }[op]        
+
 def query(command: str):
     '''
     command : Select statement eg. select a.a,b.b,c from a,b where a.a = b.a;
@@ -2201,50 +2212,51 @@ def query(command: str):
     '''
     print("User wants to query {}".format(command))
     ## check if the select statement is correct or not
+    operator_list = ['=','>','<','>=','<=']
+    
     query_match = "select\s+(.*?)\s*(?i)from\s+(.*?)\s*((?i)where\s(.*?)\s*)?;"
     if re.match(query_match, command):
         stmt = sqlparse.parse(command)[0]
         where_clause = str(stmt.tokens[-1])
         where_clause = re.sub("\s", "", re.split(';',re.sub("(?i)where","",where_clause))[0])
+        res = [i for i in operator_list if where_clause.find(i)!=-1]
         where_clause = re.split('=|>|<|>=|<=|\s',where_clause)
         tablename = str(stmt.tokens[-3]).split(",")[0]
         columns = str(stmt.tokens[2]).split(",")
 #         print(where_clause,"\t",tablename,"\t",columns)
-        return where_clause, tablename, columns
+        return str(where_clause[0]),str(where_clause[1]),res[0], tablename, columns
     else:
-
-        return -1,-1,-1
+        
+        return -1,-1,-1,-1,-1
+        
 
 
 def select_from(SQL):
-
-    where_condition, table_name, columns =  query(SQL)
-    print(table_name, where_condition[0], where_condition[1])
-
-#     column_list = get_column_names_from_catalog(table_name)
-
-#     index = column_list.index(where_condition[0])
-
-    if where_condition == -1:
+    
+    where_op, where_value, oper, table_name, columns =  query(SQL)
+    
+    column_list = get_column_names_from_catalog(table_name)
+    
+    index = column_list.index(where_op)
+        
+    if where_op == -1:
         print("Enter correct query")
-
+        
     flag = False
-    for node in read_all_pages_in_file("davisbase_columns.tbl"):
+    for node in read_all_pages_in_file(table_name + ".tbl"):
         if node['is_leaf'] :
             for cell in node['cells']:
                 data = cell['data']
-
-                if data[0] == table_name and data[1] == where_condition[0]:
-                    if data[2] == 'INT' and data[3] == int(where_condition[1]):
-                        print(cell)
-                        flag = True
-                        break
-                    elif data[2] == 'TEXT' and data[3] == str(where_condition[1]):
-                        print(cell)
-                        flag = True
-                        break
-        if flag:
-            break
+                if index == 0 :
+                    op1 = cell['rowid']
+                    op2 = where_value
+                else:
+                    op1 = where_value
+                    op2 = "'"+str(data[index - 1]) + "'"
+                
+                if get_operator_fn(oper)(op1, op2):
+                    print(cell)
+                    break
 
 
 def check_valid(file_name, pages=None, page_num=0, is_table=None):
