@@ -1,17 +1,7 @@
 
 TESTS
 
-CREATE TABLE test_table (
-    pk int,
-    issmall_num smallint,
-    isbig_num bigint,
-    isfloat float,
-    istext text,
-    isdate  date,
-    isyear  year,
-    istime time,
-    alwaysnull  tinyint
-);
+CREATE TABLE test_table ( pk int, issmall_num smallint, isbig_num bigint, isfloat float, istext text, isdate date, isyear year, istime time, alwaysnull tinyint );
 
 
 INSERT INTO test_table (pk ,issmall_num ,isbig_num ,isfloat ,istext , isdate, isyear  ,istime ,alwaysnull  )
