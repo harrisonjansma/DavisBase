@@ -1185,7 +1185,8 @@ def show_tables():
     table_name = 'davisbase_tables'
     1. get all cells from davisbase_tables.tbl  get_all_table_cells(table_name)
     2.  Use print_cells (the function you wrote) """
-
+    cells = get_all_table_cells("davisbase_tables")
+    print_cells("davisbase_tables", cells)
     return None
 
 
@@ -2069,12 +2070,6 @@ def get_predecessor(pages, page_num):
 #TO DO
 
 
-def show_tables():
-    """
-    This can be implemented by querying dabisbase_tables
-    """
-    print("ALL TABLES")
-    return None
 
 
 def check_values_match_schema(values,schema):
@@ -2369,11 +2364,11 @@ def print_cells(table_name, cells):
     print('-'*116)
     str_f2 = '{:''<17}  |{:<16} |{:''<9} | {:^14} | {:^10} | {:^8} | {:^10}'
     for cell in cells:
-        rowid = str(cell['rowid']) 
+        rowid = str(cell['rowid'])
         new_list = [str(x) for x in list(cell['data'])]
         print('\033[0m' + '{0:4}'.format(cell['rowid'])+'    |'+ str_f2.format(*(new_list)))
     print('-'*116)
-    
+
 
 def drop_table_backend(table_name):
     if os.path.exists(table_name+".tbl"):
@@ -2399,7 +2394,7 @@ def drop_table_backend(table_name):
     print()
     print_it("davisbase_tables.tbl", page_format=False)
     return
-  
+
 #############################################################################
 PAGE_SIZE = 512
 MIN_FILL_RATIO = 0.2
