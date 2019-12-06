@@ -1185,8 +1185,7 @@ def show_tables():
     table_name = 'davisbase_tables'
     1. get all cells from davisbase_tables.tbl  get_all_table_cells(table_name)
     2.  Use print_cells (the function you wrote) """
-    cells = get_all_table_cells("davisbase_tables")
-    print_cells("davisbase_tables", cells)
+    print_it("davisbase_tables.tbl", page_format=False, limit=None)
     return None
 
 
