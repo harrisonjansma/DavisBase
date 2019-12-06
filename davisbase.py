@@ -2359,6 +2359,22 @@ def check_valid(file_name, pages=None, page_num=0, is_table=None):
     else:
         return
 
+
+def print_cells(table_name, cells):
+    # cells = get_all_table_cells(table_name)
+    columns = get_column_names_from_catalog(table_name)
+    cells = sorted(cells,key = lambda x: x['rowid'])
+    str_f1 = '{:^7} |{:^10}         |{:^12}     |{:^7} |{:^10}| {:^7}| {:^8} | {:^10}'
+    print('\033[1m' + str_f1.format(*columns))
+    print('-'*116)
+    str_f2 = '{:''<17}  |{:<16} |{:''<9} | {:^14} | {:^10} | {:^8} | {:^10}'
+    for cell in cells:
+        rowid = str(cell['rowid']) 
+        new_list = [str(x) for x in list(cell['data'])]
+        print('\033[0m' + '{0:4}'.format(cell['rowid'])+'    |'+ str_f2.format(*(new_list)))
+    print('-'*116)
+    
+
 def drop_table_backend(table_name):
     if os.path.exists(table_name+".tbl"):
             os.remove(table_name+".tbl")
@@ -2383,8 +2399,7 @@ def drop_table_backend(table_name):
     print()
     print_it("davisbase_tables.tbl", page_format=False)
     return
-
-
+  
 #############################################################################
 PAGE_SIZE = 512
 MIN_FILL_RATIO = 0.2
