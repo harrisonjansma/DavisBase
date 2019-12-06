@@ -2368,6 +2368,7 @@ def print_cells(table_name, cells):
         new_list = [str(x) for x in list(cell['data'])]
         print('\033[0m' + '{0:4}'.format(cell['rowid'])+'    |'+ str_f2.format(*(new_list)))
     print('-'*116)
+    return None
 
 
 def drop_table_backend(table_name):
