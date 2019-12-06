@@ -2175,7 +2175,6 @@ def parse_create_table(SQL):
     return d
 
 
-
 def parse_insert_into(command):
 #     print("{}".format(command))
     query_match = "(?i)insert (?i)into\s+(.*?)\s*((?i)values\s(.*?)\s*)?;"
@@ -2222,7 +2221,30 @@ def parse_drop_table(command):
         print("Enter correct query")
 
 
-
+def parse_update(command):
+    print("{}".format(command))
+    ## check if the update statement is correct or not
+    query_match = "(?i)update\s+(.*?)\s*(?i)set\s+(.*?)\s*((?i)where\s(.*?)\s*)?;"
+    operator_list = ['=','>','<','>=','<=']
+    if re.match(query_match, command):
+        stmt = sqlparse.parse(command)[0]
+        where_clause = str(stmt.tokens[-1])
+        where_clause = re.sub("\s", "", re.split(';',re.sub("(?i)where","",where_clause))[0])
+        res = [i for i in operator_list if where_clause.find(i)!=-1]
+        where_clause = re.split('=|>|<|>=|<=|\s',where_clause)
+        set_col = itemgetter(*[0,-1])(re.split('=',str(stmt.tokens[-3])))
+        set_value = set_col[1]
+        set_col = set_col[0]
+        set_value = list(shlex.shlex(set_value,posix=True))[0]
+        tablename = str(stmt.tokens[2])
+        d = {}
+        condition = where_clause[0] + res[0] + where_clause[1]
+        return tablename, condition, {set_col: set_value}
+        ## perform select logic
+    else:
+        print("Enter correct query")
+        return -1,-1,-1,-1,-1
+        
 def create_index(command):
     print("create index \'{}\'".format(command))
     return None
