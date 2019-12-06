@@ -2243,7 +2243,30 @@ def parse_update(command):
         ## perform select logic
     else:
         print("Enter correct query")
-        return -1,-1,-1,-1,-1
+        return -1,-1,-1
+
+def parse_delete_from(command):
+    print("{}".format(command))
+    ## check if the update statement is correct or not
+    query_match = "(?i)DELETE FROM\s+(.*?)\s*((?i)where\s(.*?)\s*)?;"
+    operator_list = ['=','>','<','>=','<=']
+    if re.match(query_match, command):
+        stmt = sqlparse.parse(command)[0]
+        stmt = [i for i in stmt if not str(i).isspace()]
+        where_clause = str(stmt[-1])
+        where_clause = re.sub("\s", "", re.split(';',re.sub("(?i)where","",where_clause))[0])
+        res = [i for i in operator_list if where_clause.find(i)!=-1]
+        where_clause = re.split('=|>|<|>=|<=|\s',where_clause)
+        tablename = str(stmt[2])
+        
+        d = {}
+        condition = where_clause[0] + res[0] + where_clause[1]
+        return tablename, condition
+        ## perform select logic
+    else:
+        print("Enter correct query")
+        return -1,-1
+
 
 def create_index(command):
     print("create index \'{}\'".format(command))
@@ -2336,7 +2359,7 @@ def query(command: str):
 
 
 
-def select_from(SQL):
+def where(SQL):
 
     where_op, where_value, oper, table_name, columns =  query(SQL)
 
@@ -2346,7 +2369,8 @@ def select_from(SQL):
 
     if where_op == -1:
         print("Enter correct query")
-
+    
+    matched_cells = []
     flag = False
     for node in read_all_pages_in_file(table_name + ".tbl"):
         if node['is_leaf'] :
@@ -2360,8 +2384,9 @@ def select_from(SQL):
                     op2 = "'"+str(data[index - 1]) + "'"
 
                 if get_operator_fn(oper)(op1, op2):
-                    print(cell)
-                    break
+                    matched_cells.append(cell)
+ 
+    return matched_cells
 
 
 def check_valid(file_name, pages=None, page_num=0, is_table=None):
