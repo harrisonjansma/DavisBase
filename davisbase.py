@@ -16,34 +16,34 @@ def check_input(command):
     elif command[-1]!=";":
         return command
 
-    elif command == "help;":
+    elif command.lower() == "help;":
         help()
 
-    elif command == "show tables;":
+    elif command.lower() == "show tables;":
         show_tables()
 
-    elif command[0:len("create table ")] == "create table ":
+    elif command[0:len("create table ")].lower() == "create table ":
         create_table(command)
 
-    elif command[0:len("drop table ")] == "drop table ":
+    elif command[0:len("drop table ")].lower() == "drop table ":
         drop_table(command)
 
-    elif command[0:len("create index ")] == "create index ":
+    elif command[0:len("create index ")].lower() == "create index ":
         create_index(command)
 
-    elif command[0:len("insert ")] == "insert ":
+    elif command[0:len("insert ")].lower() == "insert ":
         insert_into(command)
 
-    elif command[0:len("delete ")] == "delete ":
+    elif command[0:len("delete ")].lower() == "delete ":
         delete_from(command)
 
-    elif command[0:len("update ")] == "update ":
+    elif command[0:len("update ")].lower() == "update ":
         update(command)
 
-    elif command[0:len("select ")] == "select ":
+    elif command[0:len("select ")].lower() == "select ":
         query(command)
 
-    elif command == "exit;":
+    elif command.lower() == "exit;":
         return True
 
 
