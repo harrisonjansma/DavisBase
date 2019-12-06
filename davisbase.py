@@ -4,7 +4,7 @@ import sys
 from datetime import datetime, time
 import sqlparse
 import operator
-
+import shlex
 import re
 import pdb
 
@@ -51,6 +51,8 @@ def check_input(command):
         print("Command \"{}\" not recognized".format(command))
 
 ####################################################################
+# COMPLETED FUNCTIONS
+
 
 
 def init():
@@ -111,6 +113,7 @@ def help():
     print("SELECT ...;")
     print("EXIT;")
     return None
+
 
 
 def initialize_file(table_name, is_table, is_interior=False, rchild=0):
@@ -210,6 +213,7 @@ def write_new_page(table_name, is_table, is_interior, rsibling_rchild, parent):
         f.write(newpage)
         assert(file_size%PAGE_SIZE==0)
         return int(file_size/PAGE_SIZE)
+
 
 
 def dtype_to_int(dtype):
@@ -595,6 +599,7 @@ def get_cell_indices(page, cell_indx):
     else:
         cell_bot_idx = struct.unpack(endian+'h',page[16+2*(cell_indx-1):16+2*(cell_indx)])[0]
     return cell_top_idx, cell_bot_idx
+
 
 
 def page_delete_cell(file_name, page_num, cell_indx):
@@ -1054,6 +1059,11 @@ def get_all_table_cells(table_name):
                 cells.append(cell)
     return cells
 
+###########################################################################
+
+
+
+
 
 ###########################################################################
 # CLI FUNCTIONS
@@ -1169,6 +1179,7 @@ def drop_table(command):
         print("Table \"{}\" does note exist.".format(table_name))
 
 
+
 def show_tables():
     """Go into the catalog,
     table_name = 'davisbase_tables'
@@ -1178,8 +1189,17 @@ def show_tables():
     return None
 
 
+
+
+#########################################################################
+# TESTING
+
+
+
+
 #############################################################################
 #IN PROGRESS
+
 
 
 def index_insert(table_name, column_name, index_dtype, index_value, rowid):
@@ -1355,11 +1375,13 @@ def index_leaf_split_page(file_name, split_page_num, cell2insert, index_dtype, c
     else: #Non-root ->propagate upward
         right_sibling_page = values['right_sibling_page']
         rsibling = write_new_page(table_name, is_table, is_interior, right_sibling_page, parent_num)
+
         page_delete_cells_on_and_after(file_name, split_page_num, 0)
         page_insert_cell(file_name, split_page_num, cells2copy[:middle_cell])
         update_page_header(file_name, split_page_num, rsibling_rchild=rsibling)
         page_insert_cell(file_name, rsibling, cells2copy[middle_cell+1:])
         middle_cell_binary = struct.pack(endian+'i', split_page_num) + middle_cell_binary
+
         parent_page = read_cells_in_page(file_bytes, parent_num)
         parent_cells = parent_page['cells']
 
@@ -1411,6 +1433,7 @@ def delete(table_name, rowid):
             except:
                 index_leaf_merge_page(table_name+'.tbl', next_page, cell)
         return None
+
 
 
 ###############################################################
@@ -1862,7 +1885,7 @@ def merge_children(pages, page_num, child_page_num, left=True):
         else:
             child_page['left_child_page'] = lsib['left_child_page']
 
-        ldelete_page_in_dictionary(pages, lsib['page_number'])
+        delete_page_in_dictionary(pages, lsib['page_number'])
         return id2del
 
     else:
@@ -1992,6 +2015,9 @@ def delete_page_in_dictionary(pages, page_number):
                     cell['left_child_page']-=1
                     cell['cell_binary'] = update_cell_binary(cell['cell_binary'], left_child=cell['left_child_page'])
 
+
+
+
 def page_dict_to_file(file_name, pages):
     table_name = file_name[:-4]
     if file_name[-4:]=='.tbl':
@@ -2014,6 +2040,9 @@ MAX_FILL_RATIO = 0.7
 
 ###############################################################################################
 
+
+
+
 def get_predecessor(pages, page_num):
     page = pages[page_num]
     while not page['is_leaf']:
@@ -2021,12 +2050,33 @@ def get_predecessor(pages, page_num):
         page = pages[page_num]
     return page['cells'][-1], page_num
 
-###########################################################################################
+
+
+
+#############################################################################
+#TO DO
+
+
+
 
 def check_values_match_schema(values,schema):
     """Save coding time, assume will be correct"""
     success = True
     return True
+
+
+##############################################################################
+
+
+
+#########################################################################
+#CLI FUNCTIONS
+
+
+
+#########################################################################
+# DDL FUNCTION
+
 
 def extract_definitions(token_list):
     '''
@@ -2097,11 +2147,59 @@ def parse_create_table(SQL):
 
     d = {}
     d[table_name] = {}
+    c = 1
     for col, definition in zip(col_list, definition_list):
-        d[table_name][col] = definition
-
+        isnull = 'YES'
+        isunique = 'NO'
+        isprimary = 'NO'
+        try:
+            k = definition.split()[2]
+            if k == 'not':
+                isnull = 'NO'
+            elif k == 'unique':
+                isunique = 'YES'
+            elif k == 'primary':
+                isprimary = 'YES'
+                isunique = 'YES'
+                isnull = 'NO'
+        except:
+            pass
+        
+            
+        d[table_name][col] = {"data_type" : definition.split()[1],
+                              "ordinal_position" : c,
+                               'is_nullable':isnull,
+                                'unique':isunique,
+                                'primary_key':isprimary}
+        
     return d
 
+
+
+def parse_insert_into(command):
+#     print("{}".format(command))
+    query_match = "(?i)insert (?i)into\s+(.*?)\s*((?i)values\s(.*?)\s*)?;"
+    if re.match(query_match, command):
+        stmt = sqlparse.parse(command)[0]
+        table_name = str(stmt.tokens[4])
+        column_names = table_name[table_name.find("(")+1:table_name.find(")")]
+        column_list = [x.strip() for x in column_names.split(',')]
+        table_name = table_name.split()[0]
+        values = str(stmt.tokens[-2])
+        values = re.sub("\s", "", re.split(';',re.sub("(?i)values","",values))[0])
+        values = values[values.find("(")+1:values.find(")")]
+        values = shlex.shlex(values,posix=True)
+        values.whitespace += ','
+        values.whitespace_split = True
+        values = list(values)
+#         print(values,"\t",table_name,"\t", column_list)
+        d = {}
+        d[table_name] = {}
+        for col, value in zip(column_list, values):
+            d[table_name][col] = value
+        return d
+    else:
+        print("Enter correct query")
 
 def parse_drop_table(command):
     """
@@ -2119,14 +2217,21 @@ def parse_drop_table(command):
     if re.match(query_match, command):
         stmt = sqlparse.parse(command)[0]
         tablename = str(stmt.tokens[-2])
+        return tablename
     else:
         print("Enter correct query")
-    return tablename
+
+
+
+def create_index(command):
+    print("create index \'{}\'".format(command))
+    return None
+
 
 ############################################################################
 #DML FUNCTIONS
 
-def parse_insert_into(command):
+def insert_into(command):
     '''
     Assuming values are being set along the correct order of columns
     '''
@@ -2141,7 +2246,7 @@ def parse_insert_into(command):
     else:
         print("Enter correct query")
 
-def parse_delete_from(command):
+def delete_from(command):
     print("delete from \'{}\'".format(command))
     ## check if the update statement is correct or not
     query_match = "delete\s+(.*?)\s*(?i)from\s+(.*?)\s*((?i)where\s(.*?)\s*)?;"
@@ -2155,7 +2260,7 @@ def parse_delete_from(command):
     else:
         print("Enter correct query")
 
-def parse_update(command):
+def update(command):
     print("update \'{}\'".format(command))
     ## check if the update statement is correct or not
     query_match = "(?i)update\s+(.*?)\s*(?i)set\s+(.*?)\s*((?i)where\s(.*?)\s*)?;"
@@ -2206,6 +2311,7 @@ def query(command: str):
     else:
 
         return -1,-1,-1,-1,-1
+
 
 
 def select_from(SQL):
@@ -2304,6 +2410,7 @@ def drop_table_backend(table_name):
             _, rows = schema_from_catalog(table_name, with_rowid=True)
             rowids = [row['rowid'] for row in rows]
             table_delete('davisbase_columns.tbl', rowids)
+
             data = read_all_pages_in_file('davisbase_tables.tbl')
             for page in data:
                 if not page['is_leaf']:
