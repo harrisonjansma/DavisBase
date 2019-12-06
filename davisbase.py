@@ -985,7 +985,7 @@ def print_it(file_name, page_format=False, limit=None, pages=None):
     if pages ==None:
         pages  =read_all_pages_in_file(file_name)
 
-    print(file_name[:-4])
+    print(file_name[:-4].upper())
     if page_format:
         for page in pages:
             if page["is_leaf"]:
@@ -1830,7 +1830,6 @@ def try_borrowing(pages, borrower_page):
         steal_size = len(lsib['cells'][-1]['cell_binary'])
         if lsib['num_cells']>2:
             id2fix=steal_sibling_cell(pages, borrower_page, left=True)
-            print(id2fix)
             fix_parent_pointer(pages, page['parent_page'], id2fix, left=True)
             return None #done
         else:
@@ -1886,7 +1885,7 @@ def merge_children(pages, page_num, child_page_num, left=True):
         else:
             child_page['left_child_page'] = lsib['left_child_page']
 
-        lsib['deleted'] = True
+        ldelete_page_in_dictionary(pages, lsib['page_number'])
         return id2del
 
     else:
@@ -1907,7 +1906,7 @@ def merge_children(pages, page_num, child_page_num, left=True):
         if ['right_sibling_page']!=-1 and 'left_sibling_page' in child_page:
             pages[child_page['left_sibling_page']]['right_sibling_page'] = child_page_num
         child_page['right_sibling_page'] = rsib['right_sibling_page']
-        rsib['deleted'] = True
+        delete_page_in_dictionary(pages, rsib['page_number'])
 
         i = page_children.index(rsib['page_number'])
         cell = page['cells'][i]
@@ -1979,7 +1978,6 @@ def copy_page(file_name, pages, page_number, parent, i=None):
         cells2insert = [j["cell_binary"] for j in page['cells']]
     else:
         cells2insert = page['cells'][0]['cell_binary']
-
     page_insert_cell(file_name, i, cells2insert)
     if is_interior:
         cells = sorted(page['cells'], key=lambda x: x['left_child_page'])
@@ -1992,8 +1990,30 @@ def copy_page(file_name, pages, page_number, parent, i=None):
                 i = copy_page(file_name, pages, child, page_number, i=i)
             else:
                 continue
-
     return i
+
+
+def delete_page_in_dictionary(pages, page_number):
+    del pages[page_number]
+    for page in pages:
+        if page['page_number']>=page_number:
+            page['page_number']-=1
+        if page['parent_page']!=-1:
+            if 'left_sibling_page' in page:
+                if page['left_sibling_page']>=page_number:
+                    page['left_sibling_page']-=1
+            if page['right_sibling_page']!=-1 and 'right_sibling_page' in page:
+                if page['right_sibling_page']>=page_number:
+                    page['right_sibling_page']-=1
+        if page['parent_page']>=page_number:
+            page['parent_page']-=1
+        if not page['is_leaf']:
+            if page['rightmost_child_page']>=page_number:
+                page['rightmost_child_page']-=1
+            for cell in page['cells']:
+                if cell['left_child_page']>=page_number:
+                    cell['left_child_page']-=1
+                    cell['cell_binary'] = update_cell_binary(cell['cell_binary'], left_child=cell['left_child_page'])
 
 
 
@@ -2339,6 +2359,7 @@ def check_valid(file_name, pages=None, page_num=0, is_table=None):
     else:
         return
 
+
 def print_cells(table_name, cells):
     # cells = get_all_table_cells(table_name)
     columns = get_column_names_from_catalog(table_name)
@@ -2353,6 +2374,32 @@ def print_cells(table_name, cells):
         print('\033[0m' + '{0:4}'.format(cell['rowid'])+'    |'+ str_f2.format(*(new_list)))
     print('-'*116)
     
+
+def drop_table_backend(table_name):
+    if os.path.exists(table_name+".tbl"):
+            os.remove(table_name+".tbl")
+            _, rows = schema_from_catalog(table_name, with_rowid=True)
+            rowids = [row['rowid'] for row in rows]
+            table_delete('davisbase_columns.tbl', rowids)
+
+            data = read_all_pages_in_file('davisbase_tables.tbl')
+            for page in data:
+                if not page['is_leaf']:
+                    continue
+                for cell in page['cells']:
+                    if table_name==cell['data'][0].lower():
+                        rowids = [cell['rowid']]
+                        break
+            table_delete('davisbase_tables.tbl', rowids)
+            for index in get_indexes(table_name):
+                os.remove(index)
+    else:
+        print("Table \"{}\" does note exist.".format(table_name))
+    print_it("davisbase_columns.tbl", page_format=False)
+    print()
+    print_it("davisbase_tables.tbl", page_format=False)
+    return
+  
 #############################################################################
 PAGE_SIZE = 512
 MIN_FILL_RATIO = 0.2
@@ -2379,7 +2426,6 @@ if __name__== "__main__":
         if type(out)==bool:
             exit_command = True
         elif out==None:
-            print(command)
             command=''
         else:
             continue
