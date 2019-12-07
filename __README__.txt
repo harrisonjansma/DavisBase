@@ -1,3 +1,11 @@
+SILVER TEAM
+MEMBERS
+MIHIR RANE
+TEJAS JAIN
+HARRISON JANSMA
+XUYANG
+YANNING
+
 This program was written in Python 3.6, and the only dependency is sqlparse
 
 To get sqlparse:

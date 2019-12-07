@@ -175,6 +175,7 @@ def catalog_add_table(column_dictionary):
     table_insert("davisbase_tables", [table_name])
     table_insert("davisbase_columns",[table_name, "rowid", "INT", 1, "NO", 'NO', 'NO' ] )
     for col in column_names:
+        pdb.set_trace()
         values=[table_name, col, columns[col]['data_type'].upper(), columns[col]['ordinal_position']+1, columns[col]['is_nullable'].upper(), columns[col]['unique'].upper(), columns[col]['primary_key'].upper()]
         table_insert("davisbase_columns", values)
 
