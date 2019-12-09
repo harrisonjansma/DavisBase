@@ -41,7 +41,11 @@ def check_input(command):
         update(command)
 
     elif command[0:len("select ")].lower() == "select ":
-        query(command)
+        table_name, cells = where(command)
+        if table_name==None:
+            return
+        print_cells(table_name, cells)
+        return None
 
     elif command.lower() == "exit;":
         return True
@@ -172,13 +176,13 @@ def catalog_add_table(column_dictionary):
     """
     table = list(column_dictionary.keys())
     assert(len(table)==1)
-    table_name = table[0]
-    columns =  column_dictionary[table_name]
-    column_names = list(column_dictionary[table_name].keys())
+    table_name = table[0].lower()
+    columns =  column_dictionary[table_name.upper()]
+    column_names = list(columns.keys())
     table_insert("davisbase_tables", [table_name])
     table_insert("davisbase_columns",[table_name, "rowid", "INT", 1, "NO", 'NO', 'NO' ] )
     for col in column_names:
-        values=[table_name, col, columns[col]['data_type'].upper(), columns[col]['ordinal_position']+1, columns[col]['is_nullable'].upper(), columns[col]['unique'].upper(), columns[col]['primary_key'].upper()]
+        values=[table_name, col.lower(), columns[col]['data_type'].upper(), columns[col]['ordinal_position']+1, columns[col]['is_nullable'].upper(), columns[col]['unique'].upper(), columns[col]['primary_key'].upper()]
         table_insert("davisbase_columns", values)
 
 
@@ -1071,9 +1075,11 @@ def get_all_table_cells(table_name):
 def create_table(command):
     """Given the inputs of the command line, creates table, metadata, and indexes"""
     col_catalog_dictionary = parse_create_table(command)
-    #if os.path.exists(col_catalog_dictionary[]):
-        #return None
+
     table_name = list(col_catalog_dictionary.keys())[0]
+    if os.path.exists(table_name+'.tbl'):
+        print("Table {} already exists.".format(table_name))
+        return None
     initialize_file(table_name, True)
     catalog_add_table(col_catalog_dictionary)
     initialize_indexes(col_catalog_dictionary)
@@ -1101,7 +1107,7 @@ def insert_into(command):
     """values would be a list of length self.columns, NULL represented as None"""
     """Parser needs to return "table_name", [[col1,col2,col3],[col1,col2,col3],[col1,col2,col3]]"""
     table_name, values = parse_insert_into(command)
-    violation_flag, violating_row = FUNCTION_TO_CHECK_CONSTRAINTS_THAT_WE_DONT_HAVE_YET(table_name, values)
+    violation_flag = False# , violating_row = FUNCTION_TO_CHECK_CONSTRAINTS_THAT_WE_DONT_HAVE_YET(table_name, values) -> Tejas didnt do this
     if violation_flag: #if violation fail insert
         print("Constraint violated for row {}".format(violating_row))
         return None
@@ -1110,7 +1116,7 @@ def insert_into(command):
     indexes = get_indexes(table_name)
     for val in values:
         next_page, next_rowid = get_next_page_rowid(table_name)
-        cell = table_create_cell(schema, values, False,  rowid=next_rowid)
+        cell = table_create_cell(schema, val, False,  rowid=next_rowid)
         try:
             page_insert_cell(table_name+'.tbl', next_page, cell)
         except:
@@ -1124,11 +1130,11 @@ def insert_into(command):
 
 """NEEDS CONNECTING TO PARSER"""
 def delete_from(command):
-    table_name, condition = parse_delete_from(command)
-    rowids = WHERE_FUNCTION(table_name, condition)
+    table_name, cells = where(command)
+    rowids = [i['rowid'] for i in cells]
     col_names = get_column_names_from_catalog(table_name)[1:]
     indexes = get_indexes(table_name)
-    table_delete(table_name, rowids)
+    table_delete(table_name+'.tbl', rowids)
     """for filename in indexes:
         index_colname = filename[len(table_name)+1:-4]
         i = col_names.index(index_colname) #get position
@@ -1163,7 +1169,6 @@ def drop_table(command):
         _, rows = schema_from_catalog(table_name, with_rowid=True)
         rowids = [row['rowid'] for row in rows]
         table_delete('davisbase_columns.tbl', rowids)
-
         data = read_all_pages_in_file('davisbase_tables.tbl')
         for page in data:
             if not page['is_leaf']:
@@ -1176,7 +1181,7 @@ def drop_table(command):
         for index in get_indexes(table_name):
             os.remove(index)
     else:
-        print("Table \"{}\" does note exist.".format(table_name))
+        print("Table \"{}\" does not exist.".format(table_name))
 
 
 
@@ -2053,22 +2058,6 @@ def get_predecessor(pages, page_num):
 
 
 
-#############################################################################
-#TO DO
-
-
-
-
-def check_values_match_schema(values,schema):
-    """Save coding time, assume will be correct"""
-    success = True
-    return True
-
-
-##############################################################################
-
-
-
 #########################################################################
 #CLI FUNCTIONS
 
@@ -2076,7 +2065,11 @@ def check_values_match_schema(values,schema):
 
 #########################################################################
 # DDL FUNCTION
-
+def dtype_to_python(dtype):
+    """based on the documentation, each dtype has a single-digit integer encoding"""
+    dtype = dtype.lower()
+    mapping = {"null":None,"tinyint":int, "smallint":int, "int":int, "bigint":int, "long":int, 'float':float, "double":float, "year":int, "time":datetime, "datetime":datetime, "date":datetime, "text":str}
+    return mapping[dtype]
 
 def extract_definitions(token_list):
     '''
@@ -2125,13 +2118,12 @@ def parse_create_table(SQL):
          title varchar(200) not null,
          description text);\"""
     """
-
+    SQL = SQL.rstrip()
     if re.match("(?i)create (?i)table [a-zA-Z]+\s\(\s?\n?", SQL):
         if SQL.endswith(');'):
             print("Valid statement")
     else:
-        print("Invalid statement")
-
+        pass
     parsed = sqlparse.parse(SQL)[0]
     table_name = str(parsed[4])
     _, par = parsed.token_next_by(i=sqlparse.sql.Parenthesis)
@@ -2164,16 +2156,15 @@ def parse_create_table(SQL):
                 isnull = 'NO'
         except:
             pass
-        
-            
+
+
         d[table_name][col] = {"data_type" : definition.split()[1],
                               "ordinal_position" : c,
                                'is_nullable':isnull,
                                 'unique':isunique,
                                 'primary_key':isprimary}
-        
-    return d
 
+    return d
 
 def parse_insert_into(command):
 #     print("{}".format(command))
@@ -2186,19 +2177,47 @@ def parse_insert_into(command):
         table_name = table_name.split()[0]
         values = str(stmt.tokens[-2])
         values = re.sub("\s", "", re.split(';',re.sub("(?i)values","",values))[0])
-        values = values[values.find("(")+1:values.find(")")]
-        values = shlex.shlex(values,posix=True)
-        values.whitespace += ','
-        values.whitespace_split = True
-        values = list(values)
+        vals= values.replace(' ', '')
+        values = []
+        for v in vals.split('('):
+            if len(v)==0:
+                continue
+            v = v.replace('),','')
+            v = v.replace(',)','')
+            v = v.replace(')','')
+            values.append(v.split(','))
+
 #         print(values,"\t",table_name,"\t", column_list)
-        d = {}
-        d[table_name] = {}
-        for col, value in zip(column_list, values):
-            d[table_name][col] = value
-        return d
+
+        schema_col_names = get_column_names_from_catalog(table_name)[1:]
+        schema, _ = schema_from_catalog(table_name)
+        vals = []
+        for value in values:
+            temp = []
+            for col in schema_col_names:
+                if col.upper() in column_list:
+                    j = column_list.index(col.upper())
+                    v = value[j]
+                    i = schema_col_names.index(col)
+                    py = dtype_to_python(schema[i])
+                    if py != None:
+                        if schema[i].lower()=='datetime':
+                            temp.append(datetime.strptime(v, '%m/%d/%Y %H:%M:%S'))
+                        elif schema[i].lower()=='date':
+                            temp.append(datetime.strptime(v, '%m/%d/%Y'))
+                        elif schema[i].lower()=='time':
+                            temp.append(datetime.strptime(v, '%H:%M:%S'))
+                        else:
+                            temp.append(py(v))
+                    else:
+                        temp.append(None)
+                else:
+                    temp.append(None)
+            vals.append(temp)
+        return table_name, vals
     else:
         print("Enter correct query")
+        return None
 
 def parse_drop_table(command):
     """
@@ -2212,6 +2231,9 @@ def parse_drop_table(command):
     """
     ## check if the drop statement is correct or not
     ## statement must compulsarily end with semicolon
+
+    return command[len("drop table "):-1].lower()
+    #WRONG
     query_match = "(?i)DROP\s+(.*?)\s*(?i)TABLE\s+[a-zA-Z]+\;"
     if re.match(query_match, command):
         stmt = sqlparse.parse(command)[0]
@@ -2258,8 +2280,6 @@ def parse_delete_from(command):
         res = [i for i in operator_list if where_clause.find(i)!=-1]
         where_clause = re.split('=|>|<|>=|<=|\s',where_clause)
         tablename = str(stmt[2])
-        
-        d = {}
         condition = where_clause[0] + res[0] + where_clause[1]
         return tablename, condition
         ## perform select logic
@@ -2275,51 +2295,6 @@ def create_index(command):
 
 ############################################################################
 #DML FUNCTIONS
-
-# def insert_into(command):
-#     '''
-#     Assuming values are being set along the correct order of columns
-#     '''
-#     print("Insert into \'{}\'".format(command))
-#     query_match = "insert into\s+(.*?)\s*((?i)values\s(.*?)\s*)?;"
-#     if re.match(query_match, command):
-#         stmt = sqlparse.parse(command)[0]
-#         table_name = str(stmt.tokens[4])
-#         values = str(stmt.tokens[-2])
-#         values = re.sub("\s", "", re.split(';',re.sub("(?i)values","",values))[0])
-#         print(values,"\t",table_name)
-#     else:
-#         print("Enter correct query")
-
-# def delete_from(command):
-#     print("delete from \'{}\'".format(command))
-#     ## check if the update statement is correct or not
-#     query_match = "delete\s+(.*?)\s*(?i)from\s+(.*?)\s*((?i)where\s(.*?)\s*)?;"
-#     if re.match(query_match, command):
-#         stmt = sqlparse.parse(command)[0]
-#         where_clause = str(stmt.tokens[-1])
-#         where_clause = re.sub("\s", "", re.split(';',re.sub("(?i)where","",where_clause))[0])
-#         where_clause = re.split('=|>|<|>=|<=|\s',where_clause)
-#         tablename = str(stmt.tokens[-3]).split(",")
-#         print(where_clause,"\t",tablename)
-#     else:
-#         print("Enter correct query")
-
-# def update(command):
-#     print("update \'{}\'".format(command))
-#     ## check if the update statement is correct or not
-#     query_match = "(?i)update\s+(.*?)\s*(?i)set\s+(.*?)\s*((?i)where\s(.*?)\s*)?;"
-#     if re.match(query_match, command):
-#         stmt = sqlparse.parse(command)[0]
-#         where_clause = str(stmt.tokens[-1])
-#         where_clause = re.sub("\s", "", re.split(';',re.sub("(?i)where","",where_clause))[0])
-#         where_clause = re.split('=|>|<|>=|<=|\s',where_clause)
-#         set_col = itemgetter(*[0,-1])(re.split('=|\s',str(stmt.tokens[-3])))
-#         tablename = str(stmt.tokens[2])
-#         print(where_clause,"\t", tablename,"\t",set_col)
-#         ## perform select logic
-#     else:
-#         print("Enter correct query")
 
 ##########################################################################
 #DQL FUNCTIONS
@@ -2338,38 +2313,34 @@ def query(command: str):
     command : Select statement eg. select a.a,b.b,c from a,b where a.a = b.a;
     return : None
     '''
-    print("User wants to query {}".format(command))
     ## check if the select statement is correct or not
     operator_list = ['=','>','<','>=','<=']
-
     query_match = "select\s+(.*?)\s*(?i)from\s+(.*?)\s*((?i)where\s(.*?)\s*)?;"
-    if re.match(query_match, command):
-        stmt = sqlparse.parse(command)[0]
-        where_clause = str(stmt.tokens[-1])
-        where_clause = re.sub("\s", "", re.split(';',re.sub("(?i)where","",where_clause))[0])
-        res = [i for i in operator_list if where_clause.find(i)!=-1]
-        where_clause = re.split('=|>|<|>=|<=|\s',where_clause)
-        tablename = str(stmt.tokens[-3]).split(",")[0]
-        columns = str(stmt.tokens[2]).split(",")
-#         print(where_clause,"\t",tablename,"\t",columns)
-        return str(where_clause[0]),str(where_clause[1]),res[0], tablename, columns
-    else:
 
-        return -1,-1,-1,-1,-1
+    if "WHERE" not in command:
+        command = command[:-1]+" WHERE ROWID > 0;"
+
+    stmt = sqlparse.parse(command)[0]
+    where_clause = str(stmt.tokens[-1])
+    where_clause = re.sub("\s", "", re.split(';',re.sub("(?i)where","",where_clause))[0])
+    res = [i for i in operator_list if where_clause.find(i)!=-1]
+    where_clause = re.split('>=|<=|=|>|<|\s',where_clause)
+    tablename = str(stmt.tokens[-3]).split(",")[0]
+    columns = str(stmt.tokens[2]).split(",")
+    return str(where_clause[0]),str(where_clause[1]),res[-1], tablename, columns
+
 
 
 
 def where(SQL):
-
     where_op, where_value, oper, table_name, columns =  query(SQL)
-
+    if not os.path.exists(table_name.lower()+'.tbl'):
+        print("Table {} does not exist.".format(table_name))
+        return None, None
     column_list = get_column_names_from_catalog(table_name)
-
-    index = column_list.index(where_op)
-
+    index = column_list.index(where_op.lower())
     if where_op == -1:
         print("Enter correct query")
-    
     matched_cells = []
     flag = False
     for node in read_all_pages_in_file(table_name + ".tbl"):
@@ -2377,16 +2348,14 @@ def where(SQL):
             for cell in node['cells']:
                 data = cell['data']
                 if index == 0 :
-                    op1 = cell['rowid']
+                    op1 = str(cell['rowid'])
                     op2 = where_value
                 else:
-                    op1 = where_value
-                    op2 = "'"+str(data[index - 1]) + "'"
-
+                    op1 = str(where_value)
+                    op2 = str(data[index - 1])
                 if get_operator_fn(oper)(op1, op2):
                     matched_cells.append(cell)
- 
-    return matched_cells
+    return table_name, matched_cells
 
 
 def check_valid(file_name, pages=None, page_num=0, is_table=None):
@@ -2438,39 +2407,32 @@ def check_valid(file_name, pages=None, page_num=0, is_table=None):
 def print_cells(table_name, cells):
     # cells = get_all_table_cells(table_name)
     columns = get_column_names_from_catalog(table_name)
-    cells = sorted(cells,key = lambda x: x['rowid'])
-    str_f1 = '{:^7} |{:^10}         |{:^12}     |{:^7} |{:^10}| {:^7}| {:^8} | {:^10}'
-    print('\033[1m' + str_f1.format(*columns))
-    print('-'*116)
-    str_f2 = '{:''<17}  |{:<16} |{:''<9} | {:^14} | {:^10} | {:^8} | {:^10}'
+    print(*columns)
+    cells = sorted(cells, key=lambda x: x['rowid'])
     for cell in cells:
-        rowid = str(cell['rowid'])
-        new_list = [str(x) for x in list(cell['data'])]
-        print('\033[0m' + '{0:4}'.format(cell['rowid'])+'    |'+ str_f2.format(*(new_list)))
-    print('-'*116)
+        print(cell['rowid'], *cell['data'])
     return None
 
 
 def drop_table_backend(table_name):
     if os.path.exists(table_name+".tbl"):
-            os.remove(table_name+".tbl")
-            _, rows = schema_from_catalog(table_name, with_rowid=True)
-            rowids = [row['rowid'] for row in rows]
-            table_delete('davisbase_columns.tbl', rowids)
-
-            data = read_all_pages_in_file('davisbase_tables.tbl')
-            for page in data:
-                if not page['is_leaf']:
-                    continue
-                for cell in page['cells']:
-                    if table_name==cell['data'][0].lower():
-                        rowids = [cell['rowid']]
-                        break
-            table_delete('davisbase_tables.tbl', rowids)
-            for index in get_indexes(table_name):
-                os.remove(index)
+        os.remove(table_name+".tbl")
+        _, rows = schema_from_catalog(table_name, with_rowid=True)
+        rowids = [row['rowid'] for row in rows]
+        table_delete('davisbase_columns.tbl', rowids)
+        data = read_all_pages_in_file('davisbase_tables.tbl')
+        for page in data:
+            if not page['is_leaf']:
+                continue
+            for cell in page['cells']:
+                if table_name==cell['data'][0].lower():
+                    rowids = [cell['rowid']]
+                    break
+        table_delete('davisbase_tables.tbl', rowids)
+        for index in get_indexes(table_name):
+            os.remove(index)
     else:
-        print("Table \"{}\" does note exist.".format(table_name))
+        print("Table \"{}\" does not exist.".format(table_name))
     print_it("davisbase_columns.tbl", page_format=False)
     print()
     print_it("davisbase_tables.tbl", page_format=False)
