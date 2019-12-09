@@ -178,7 +178,6 @@ def catalog_add_table(column_dictionary):
     table_insert("davisbase_tables", [table_name])
     table_insert("davisbase_columns",[table_name, "rowid", "INT", 1, "NO", 'NO', 'NO' ] )
     for col in column_names:
-        pdb.set_trace()
         values=[table_name, col, columns[col]['data_type'].upper(), columns[col]['ordinal_position']+1, columns[col]['is_nullable'].upper(), columns[col]['unique'].upper(), columns[col]['primary_key'].upper()]
         table_insert("davisbase_columns", values)
 
@@ -1116,12 +1115,12 @@ def insert_into(command):
             page_insert_cell(table_name+'.tbl', next_page, cell)
         except:
             table_leaf_split_page(table_name+'.tbl', next_page, cell)
-        for filename in indexes:
+        """for filename in indexes:
             index_colname = filename[len(table_name)+1:-4]
             i = col_names.index(index_colname)
             index_dtype= schema[i]
             index_value= val[i] #index by ord position
-            index_insert(table_name, index_colname, index_dtype, index_value, next_rowid)
+            index_insert(table_name, index_colname, index_dtype, index_value, next_rowid)"""
 
 """NEEDS CONNECTING TO PARSER"""
 def delete_from(command):
@@ -2165,14 +2164,14 @@ def parse_create_table(SQL):
                 isnull = 'NO'
         except:
             pass
-        
-            
+
+
         d[table_name][col] = {"data_type" : definition.split()[1],
                               "ordinal_position" : c,
                                'is_nullable':isnull,
                                 'unique':isunique,
                                 'primary_key':isprimary}
-        
+
     return d
 
 
@@ -2259,7 +2258,7 @@ def parse_delete_from(command):
         res = [i for i in operator_list if where_clause.find(i)!=-1]
         where_clause = re.split('=|>|<|>=|<=|\s',where_clause)
         tablename = str(stmt[2])
-        
+
         d = {}
         condition = where_clause[0] + res[0] + where_clause[1]
         return tablename, condition
@@ -2370,7 +2369,7 @@ def where(SQL):
 
     if where_op == -1:
         print("Enter correct query")
-    
+
     matched_cells = []
     flag = False
     for node in read_all_pages_in_file(table_name + ".tbl"):
@@ -2386,7 +2385,7 @@ def where(SQL):
 
                 if get_operator_fn(oper)(op1, op2):
                     matched_cells.append(cell)
- 
+
     return matched_cells
 
 
