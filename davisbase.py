@@ -48,6 +48,9 @@ def check_input(command):
         print_cells(table_name, cells)
         return None
 
+    elif command.lower()=='test;':
+        return 'break'
+
     elif command.lower() == "exit;":
         return True
 
@@ -1124,23 +1127,25 @@ def insert_into(command):
             table_leaf_split_page(table_name+'.tbl', next_page, cell)
         for filename in indexes:
             index_colname = filename[len(table_name)+1:-4]
-            i = col_names.index(index_colname)
+            i = col_names.index(index_colname.lower())
             index_dtype= schema[i]
             index_value= val[i] #index by ord position
             index_insert(table_name, index_colname, index_dtype, index_value, next_rowid)
 
 """NEEDS CONNECTING TO PARSER"""
 def delete_from(command):
-    table_name, cells = where(command)
-    rowids = [i['rowid'] for i in cells]
-    col_names = get_column_names_from_catalog(table_name)[1:]
-    indexes = get_indexes(table_name)
-    table_delete(table_name+'.tbl', rowids)
-    """for filename in indexes:
-        index_colname = filename[len(table_name)+1:-4]
-        i = col_names.index(index_colname) #get position
-        index_value = cell['data'][i] #index by ord position
-        index_delete(table_name, index_colname, index_value, cell['rowid'])"""
+    cells=[' initial ']
+    while cells:
+        table_name, cells = where(command)
+        rowids = [i['rowid'] for i in cells]
+        col_names = get_column_names_from_catalog(table_name)[1:]
+        indexes = get_indexes(table_name)
+        table_delete(table_name+'.tbl', rowids)
+        """for filename in indexes:
+            index_colname = filename[len(table_name)+1:-4]
+            i = col_names.index(index_colname) #get position
+            index_value = cell['data'][i] #index by ord position
+            index_delete(table_name, index_colname, index_value, cell['rowid'])"""
 
 """NEEDS CONNECTING TO PARSER"""
 def update(command):
@@ -1150,8 +1155,7 @@ def update(command):
     "column2":new_value_to_update_to,
     "column4":new_value_to_update_to,
     }"""
-    table_name, condition, dict_new_values = parse_update(command)
-    table_name, cells = where(command)
+    table_name, cells, dict_new_values = parse_update(command)
     list_of_rowids = [c['rowid'] for c in cells]
     table_update(table_name+'.tbl', list_of_rowids, dict_new_values)
 """for filename in indexes:
@@ -1179,12 +1183,10 @@ def drop_table(command):
                     rowids = [cell['rowid']]
                     break
         table_delete('davisbase_tables.tbl', rowids)
-        for index in get_indexes(table_name):
+        for index in get_indexes(table_name.upper()):
             os.remove(index)
     else:
         print("Table \"{}\" does not exist.".format(table_name))
-
-
 
 def show_tables():
     """Go into the catalog,
@@ -1194,19 +1196,8 @@ def show_tables():
     print_it("davisbase_tables.tbl", page_format=False, limit=None)
     return None
 
-
-
-
 #########################################################################
 # TESTING
-
-
-
-
-#############################################################################
-#IN PROGRESS
-
-
 
 def index_insert(table_name, column_name, index_dtype, index_value, rowid):
     """rowid will not be present, but will key value be present?
@@ -1236,7 +1227,6 @@ def index_insert(table_name, column_name, index_dtype, index_value, rowid):
             index_insert_cell_in_page(file_name, page_num, cell, cell_indx)
         except:
             index_leaf_split_page(file_name, page_num, cell, index_dtype, cell_indx)
-
 
 def index_interior_split_page(file_name, split_page_num, cell2insert, new_rightmost_page, cell_index):
     pages = read_all_pages_in_file(file_name)
@@ -1334,7 +1324,6 @@ def index_interior_split_page(file_name, split_page_num, cell2insert, new_rightm
 
         return rsibling
 
-
 def index_leaf_split_page(file_name, split_page_num, cell2insert, index_dtype, cell_index):
     file_bytes = load_file(file_name)
     values = read_cells_in_page(file_bytes, split_page_num)
@@ -1416,8 +1405,6 @@ def index_leaf_split_page(file_name, split_page_num, cell2insert, index_dtype, c
             print("splitting",rsibling, split_page_num)
             assert(False)
 
-
-
 def delete(table_name, rowid):
     page_num, cell_indx = page_cell_indx_given_index_value(table_name, rowid)
     if cell_indx is None: #no value found
@@ -1440,11 +1427,8 @@ def delete(table_name, rowid):
                 index_leaf_merge_page(table_name+'.tbl', next_page, cell)
         return None
 
-
-
 ###############################################################
 #TABLE INSERT FUNCTIONS
-
 
 def page_insert_cell(file_name, page_num, cell):
     """
@@ -1497,7 +1481,6 @@ def page_insert_cell(file_name, page_num, cell):
     save_page(file_name, page_num, page)
     return None
 
-
 def page_delete_cells_on_and_after(file_name, page_num, cell_indx):
     """Deletes all cells in page on or after cell_indx (starts w zero)"""
     file_bytes = load_file(file_name)
@@ -1519,7 +1502,6 @@ def page_delete_cells_on_and_after(file_name, page_num, cell_indx):
     save_page(file_name, page_num, page)
     assert(len(page)==PAGE_SIZE) #ensure page is same size
     return (num_cells - 1) == 0
-
 
 def table_interior_split_page(file_name, split_page_num, cell2insert, new_rightmost_page):
     pages = read_all_pages_in_file(file_name)
@@ -1599,7 +1581,6 @@ def table_interior_split_page(file_name, split_page_num, cell2insert, new_rightm
             update_page_header(file_name, split_page_num, parent = new_parent)
         return rsibling
 
-#could put these two together, but I dont care
 def table_leaf_split_page(file_name, split_page_num, cell2insert):
     file_bytes = load_file(file_name)
     values = read_cells_in_page(file_bytes, split_page_num)
@@ -1708,7 +1689,10 @@ def get_page_cell_indx(pages, value, page_num):
                 if is_leaf: #got a match
                     return page_num, cell_indx
                 else:
-                    continue #next iteration will get it
+                    if cell_indx+1==len(page['cells']):
+                        return get_page_cell_indx(pages, value, page['rightmost_child_page'])
+                    else:
+                        continue #next iteration will get it
             elif (cell['rowid'] > value): #same
                 if not is_leaf:
                     return get_page_cell_indx(pages, value, cell['left_child_page'])
@@ -1728,14 +1712,22 @@ def table_update(file_name, list_of_rowids, new_value_dict):
     col_names = get_column_names_from_catalog(table_name)[1:]
     schema, _ = schema_from_catalog(table_name, with_rowid=False)
     cols2change = list(new_value_dict.keys())
+    if len(list_of_rowids)==0:
+        return
 
     pages = read_all_pages_in_file(file_name)
     if len(pages)==1 and pages[0]['num_cells']==0: #empty table
         return None
     for rowid in list_of_rowids:
-        page_num, indx = page_cell_indx_given_key(pages, rowid)
+        try:
+            page_num, indx = page_cell_indx_given_key(pages, rowid)
+        except:
+            pdb.set_trace()
         page = pages[page_num]
-        cell = page['cells'][indx]
+        try:
+            cell = page['cells'][indx]
+        except:
+            pdb.set_trace()
         is_interior = not page['is_leaf']
         assert(cell['rowid']==rowid)
         prev_row_values = cell['data']
@@ -1743,14 +1735,10 @@ def table_update(file_name, list_of_rowids, new_value_dict):
             i = col_names.index(col)
             prev_row_values[i] = new_value_dict[col]
         if is_interior:
-            cell = table_create_cell(schema, prev_row_values, is_interior, left_child_page=cell['left_child_page'],  rowid=cell['rowid'])
+            cell = table_create_cell(schema, prev_row_values, is_interior, left_child_page=cell['left_child_page'], rowid=cell['rowid'])
         else:
             cell = table_create_cell(schema, prev_row_values, is_interior, left_child_page=None,  rowid=cell['rowid'])
-        #violation_flag, violating_row = FUNCTION_TO_CHECK_CONSTRAINTS_THAT_WE_DONT_HAVE_YET(table_name, [prev_row_values])
-        #if violation_flag: #if violation fail insert
-        #    print("Constraint violated for row {}".format(violating_row))
-        #    print("Update cancellsd...")
-        #    return None
+
         page['cells'][indx]['cell_binary'] = cell
         page['cells'][indx]['data'] = prev_row_values
     page_dict_to_file(file_name, pages)
@@ -1801,9 +1789,9 @@ def fix_parent_pointer(pages, parent_page, id2fix, left=True):
     for i, id in enumerate(page['rowids']):
         if left:
             if id > id2fix:
-                page['rowids'][i]=id2fix
-                page['cells'][i]['cell_binary']=update_cell_binary(page['cells'][i]['cell_binary'], rowid=id2fix)
-                page['cells'][i]['rowid']=id2fix
+                page['rowids'][i]=id2fix-1
+                page['cells'][i]['cell_binary']=update_cell_binary(page['cells'][i]['cell_binary'], rowid=id2fix-1)
+                page['cells'][i]['rowid']=id2fix-1
                 break
         else:
             if id > id2fix:
@@ -1911,8 +1899,6 @@ def merge_children(pages, page_num, child_page_num, left=True):
         if ['right_sibling_page']!=-1 and 'left_sibling_page' in child_page:
             pages[child_page['left_sibling_page']]['right_sibling_page'] = child_page_num
         child_page['right_sibling_page'] = rsib['right_sibling_page']
-        delete_page_in_dictionary(pages, rsib['page_number'])
-
         i = page_children.index(rsib['page_number'])
         cell = page['cells'][i]
         if i+1 ==len(pages[page['parent_page']]['cells']):
@@ -1920,15 +1906,12 @@ def merge_children(pages, page_num, child_page_num, left=True):
         else:
             cell['left_child_page'] = child_page['page_number']
             cell['cell_binary'] = update_cell_binary(cell['cell_binary'], left_child=child_page['page_number'])
-
-
+        delete_page_in_dictionary(pages, rsib['page_number'])
         return id2del
-
 
 def table_delete_recursion(pages, page_num, rowid):
     page = pages[page_num]
     if page['is_leaf']:
-
         return delete_dict(pages, page_num, rowid) #returns 'left' pr 'right' or None
     else:
         for  i, cell in enumerate(page['cells']):
@@ -1945,12 +1928,12 @@ def table_delete_recursion(pages, page_num, rowid):
 
         if merge_child is None: #all clear no merges necessary
             return None
-
         elif merge_child=='left': #merge left
             if page['parent_page']==-1 and page['num_cells']==1: #root condition
                 merge_children(pages, page_num, child_page, left=True)
-                page['deleted'] = True #remove the root
-                page['parent_page'] = -1 #so ican find the root later
+                pages[page['rightmost_child_page']]['parent_page'] = -1
+                delete_page_in_dictionary(pages, page_num)
+                #so ican find the root later
             else:
                 id2del = merge_children(pages, page_num, child_page, left=True)
                 return delete_dict(pages, page_num, id2del)
@@ -1958,8 +1941,8 @@ def table_delete_recursion(pages, page_num, rowid):
         elif merge_child=='right': #parent of a leaf node
             if page['parent_page']==-1 and page['num_cells']==1: #root condition
                 merge_children(pages, page_num, child_page, left=False)
-                page['deleted'] = True #remove the root
-                page['parent_page'] = -13 #so ican find the root later
+                pages[page['cells'][0]['left_child_page']]['parent_page'] = -1
+                delete_page_in_dictionary(pages, page_num)
             else:
                 id2del = merge_children(pages, page_num, child_page, left=False)
                 return delete_dict(pages, page_num, id2del)
@@ -1979,13 +1962,17 @@ def copy_page(file_name, pages, page_number, parent, i=None):
         i=0
 
     write_new_page(table_name, is_table, is_interior, rsibling_rchild, parent)
+    cells = page['cells']
+    if is_interior:
+        if cells!=sorted(cells, key=lambda x: x['left_child_page']):
+            for cell, scell in zip(cells, sorted(cells, key=lambda x: x['left_child_page'])):
+                cell['cell_binary'] = update_cell_binary(cell['cell_binary'], left_child=scell['left_child_page'])
     if page['num_cells']>1:
-        cells2insert = [j["cell_binary"] for j in page['cells']]
+        cells2insert = [j["cell_binary"] for j in cells]
     else:
-        cells2insert = page['cells'][0]['cell_binary']
+        cells2insert = cells[0]['cell_binary']
     page_insert_cell(file_name, i, cells2insert)
     if is_interior:
-        cells = sorted(page['cells'], key=lambda x: x['left_child_page'])
         children = [j["left_child_page"] for j in cells]+[page['rightmost_child_page']]
         for child in children:
             if 'deleted' not in pages[child]:
@@ -1996,7 +1983,6 @@ def copy_page(file_name, pages, page_number, parent, i=None):
             else:
                 continue
     return i
-
 
 def delete_page_in_dictionary(pages, page_number):
     del pages[page_number]
@@ -2020,9 +2006,6 @@ def delete_page_in_dictionary(pages, page_number):
                     cell['left_child_page']-=1
                     cell['cell_binary'] = update_cell_binary(cell['cell_binary'], left_child=cell['left_child_page'])
 
-
-
-
 def page_dict_to_file(file_name, pages):
     table_name = file_name[:-4]
     if file_name[-4:]=='.tbl':
@@ -2040,31 +2023,9 @@ def page_dict_to_file(file_name, pages):
     copy_page(file_name, pages, root_node, -1)
     return None
 
-MIN_FILL_RATIO = 0.2
-MAX_FILL_RATIO = 0.7
-
-###############################################################################################
-
-
-
-
-def get_predecessor(pages, page_num):
-    page = pages[page_num]
-    while not page['is_leaf']:
-        page_num = page['rightmost_child_page']
-        page = pages[page_num]
-    return page['cells'][-1], page_num
-
-
-
 
 #########################################################################
-#CLI FUNCTIONS
-
-
-
-#########################################################################
-# DDL FUNCTION
+# CLI FUNCTION
 def dtype_to_python(dtype):
     """based on the documentation, each dtype has a single-digit integer encoding"""
     dtype = dtype.lower()
@@ -2074,17 +2035,25 @@ def dtype_to_python(dtype):
 def to_python(schema_columns, schema, column, v):
     i = schema_columns.index(column)
     py = dtype_to_python(schema[i])
+    if v=='NULL':
+        return None
     if py != None:
         if schema[i].lower()=='datetime':
-            return datetime.strptime(v, '%m/%d/%Y %H:%M:%S')
+            try:
+                return datetime.strptime(v, '%m/%d/%Y %H:%M:%S')
+            except:
+                return datetime.strptime(v, '%Y-%m-%d %H:%M:%S')
         elif schema[i].lower()=='date':
-            return datetime.strptime(v, '%m/%d/%Y')
+            try:
+                return datetime.strptime(v, '%m/%d/%Y')
+            except:
+                return datetime.strptime(v, '%Y-%m-%d')
         elif schema[i].lower()=='time':
-            return datetime.strptime(v, '%H:%M:%S')
+            return datetime.strptime("1/2/1970 "+v, '%m/%d/%Y %H:%M:%S')
         else:
             return py(v)
-
-
+    else:
+        return None
 
 def extract_definitions(token_list):
     '''
@@ -2107,7 +2076,6 @@ def extract_definitions(token_list):
     if tmp and isinstance(tmp[0], sqlparse.sql.Identifier):
         definitions.append(tmp)
     return definitions
-
 
 def parse_create_table(SQL):
     """
@@ -2134,11 +2102,6 @@ def parse_create_table(SQL):
          description text);\"""
     """
     SQL = SQL.rstrip()
-    if re.match("(?i)create (?i)table [a-zA-Z]+\s\(\s?\n?", SQL):
-        if SQL.endswith(');'):
-            print("Valid statement")
-    else:
-        pass
     parsed = sqlparse.parse(SQL)[0]
     table_name = str(parsed[4])
     _, par = parsed.token_next_by(i=sqlparse.sql.Parenthesis)
@@ -2156,29 +2119,23 @@ def parse_create_table(SQL):
     d[table_name] = {}
     c = 1
     for col, definition in zip(col_list, definition_list):
-        isnull = 'YES'
+        isnull = 'NO'
         isunique = 'NO'
         isprimary = 'NO'
-        try:
-            k = definition.split()[2]
-            if k == 'not':
-                isnull = 'NO'
-            elif k == 'unique':
-                isunique = 'YES'
-            elif k == 'primary':
-                isprimary = 'YES'
-                isunique = 'YES'
-                isnull = 'NO'
-        except:
-            pass
-
-
-        d[table_name][col] = {"data_type" : definition.split()[1],
+        definition = definition[len(col)+1:]
+        if 'NOT NULL' in definition:
+            isnull = 'YES'
+        elif 'UNIQUE' in definition:
+            isunique = 'YES'
+        elif 'PRIMARY KEY' in definition:
+            isprimary = 'YES'
+            isunique = 'YES'
+            isnull = 'YES'
+        d[table_name][col] = {"data_type" : definition.split()[0],
                               "ordinal_position" : c,
                                'is_nullable':isnull,
                                 'unique':isunique,
                                 'primary_key':isprimary}
-
     return d
 
 def parse_insert_into(command):
@@ -2202,8 +2159,6 @@ def parse_insert_into(command):
             v = v.replace(')','')
             values.append(v.split(','))
 
-#         print(values,"\t",table_name,"\t", column_list)
-
         schema_col_names = get_column_names_from_catalog(table_name)[1:]
         schema, _ = schema_from_catalog(table_name)
         vals = []
@@ -2213,19 +2168,7 @@ def parse_insert_into(command):
                 if col.upper() in column_list:
                     j = column_list.index(col.upper())
                     v = value[j]
-                    i = schema_col_names.index(col)
-                    py = dtype_to_python(schema[i])
-                    if py != None:
-                        if schema[i].lower()=='datetime':
-                            temp.append(datetime.strptime(v, '%m/%d/%Y %H:%M:%S'))
-                        elif schema[i].lower()=='date':
-                            temp.append(datetime.strptime(v, '%m/%d/%Y'))
-                        elif schema[i].lower()=='time':
-                            temp.append(datetime.strptime(v, '%H:%M:%S'))
-                        else:
-                            temp.append(py(v))
-                    else:
-                        temp.append(None)
+                    temp.append(to_python(schema_col_names, schema, col, v))
                 else:
                     temp.append(None)
             vals.append(temp)
@@ -2257,26 +2200,48 @@ def parse_drop_table(command):
     else:
         print("Enter correct query")
 
-
 def parse_update(command):
-    print("{}".format(command))
-    ## check if the update statement is correct or not
     query_match = "(?i)update\s+(.*?)\s*(?i)set\s+(.*?)\s*((?i)where\s(.*?)\s*)?;"
     operator_list = ['=','>','<','>=','<=']
+
     if re.match(query_match, command):
         stmt = sqlparse.parse(command)[0]
         where_clause = str(stmt.tokens[-1])
         where_clause = re.sub("\s", "", re.split(';',re.sub("(?i)where","",where_clause))[0])
         res = [i for i in operator_list if where_clause.find(i)!=-1]
         where_clause = re.split('>=|<=|=|>|<|\s',where_clause)
-        set_col = itemgetter(*[0,-1])(re.split('=',str(stmt.tokens[-3])))
-        set_value = set_col[1]
-        set_col = set_col[0]
-        set_value = list(shlex.shlex(set_value,posix=True))[0]
+
         tablename = str(stmt.tokens[2])
-        d = {}
+        table_name = tablename
         condition = where_clause[0] + res[0] + where_clause[1]
-        return tablename, condition, {set_col: set_value}
+
+        schema_columns = get_column_names_from_catalog(tablename)[1:]
+        schema, _ = schema_from_catalog(tablename)
+        set_col = str(stmt.tokens[-3])
+        set_col = set_col.replace(' ','')
+        set_col = set_col.split(',')
+        set_col = [[i.split("=")[0], to_python(schema_columns, schema, i.split("=")[0].lower(), i.split("=")[1])] for i in set_col]
+        d = {}
+        for i, j in set_col:
+            d[i.lower()] = j
+
+        where_op, where_value, oper = str(where_clause[0]), str(where_clause[1]), res[-1]
+        column_list = get_column_names_from_catalog(table_name)
+        index = column_list.index(where_op.lower())
+        matched_cells = []
+        for node in read_all_pages_in_file(table_name + ".tbl"):
+            if node['is_leaf'] :
+                for cell in node['cells']:
+                    data = cell['data']
+                    if index == 0 :
+                        op1 = cell['rowid']
+                        op2 = int(where_value)
+                    else:
+                        op2 = to_python(column_list, schema, where_op.lower(), where_value)
+                        op1 = data[index - 1]
+                    if get_operator_fn(oper)(op1, op2):
+                        matched_cells.append(cell)
+        return tablename, matched_cells, d
         ## perform select logic
     else:
         print("Enter correct query")
@@ -2302,17 +2267,12 @@ def parse_delete_from(command):
         print("Enter correct query")
         return -1,-1
 
-
 def create_index(command):
     print("create index \'{}\'".format(command))
     return None
 
-
-############################################################################
-#DML FUNCTIONS
-
 ##########################################################################
-#DQL FUNCTIONS
+#QUERY FUNCTIONS
 
 def get_operator_fn(op):
     return {
@@ -2334,7 +2294,6 @@ def query(command: str):
 
     if "WHERE" not in command:
         command = command[:-1]+" WHERE ROWID > 0;"
-
     stmt = sqlparse.parse(command)[0]
     where_clause = str(stmt.tokens[-1])
     where_clause = re.sub("\s", "", re.split(';',re.sub("(?i)where","",where_clause))[0])
@@ -2343,9 +2302,6 @@ def query(command: str):
     tablename = str(stmt.tokens[-3]).split(",")[0]
     columns = str(stmt.tokens[2]).split(",")
     return str(where_clause[0]),str(where_clause[1]),res[-1], tablename, columns
-
-
-
 
 def where(SQL):
     where_op, where_value, oper, table_name, columns =  query(SQL)
@@ -2367,12 +2323,11 @@ def where(SQL):
                     op1 = cell['rowid']
                     op2 = int(where_value)
                 else:
-                    op2 = to_python(column_list, schema, where_op.lower(), where_value)
+                    op2 = to_python(column_list[1:], schema, where_op.lower(), where_value)
                     op1 = data[index - 1]
                 if get_operator_fn(oper)(op1, op2):
                     matched_cells.append(cell)
     return table_name, matched_cells
-
 
 def check_valid(file_name, pages=None, page_num=0, is_table=None):
     if page_num==0:
@@ -2419,40 +2374,38 @@ def check_valid(file_name, pages=None, page_num=0, is_table=None):
     else:
         return
 
-
 def print_cells(table_name, cells):
-    # cells = get_all_table_cells(table_name)
+    schema, _ = schema_from_catalog(table_name)
     columns = get_column_names_from_catalog(table_name)
-    print(*columns)
+    str_f1 = '{:^12}|'
+    for s in schema:
+        if s.lower()=='text':
+            str_f1 += '{:^25}|'
+        else:
+            str_f1 += '{:^12}|'
+    str_f1 = str_f1[:-1]
+    print(str_f1.format(*columns))
     cells = sorted(cells, key=lambda x: x['rowid'])
     for cell in cells:
-        print(cell['rowid'], *cell['data'])
+        data =[]
+        for d, z in zip(cell['data'], schema):
+            if d==None:
+                data.append('NULL')
+            elif z.lower()=='date':
+                data.append(str(d.date()))
+            elif z.lower()=='time':
+                data.append(ste(d.time()))
+            elif z.lower()=='datetime':
+                data.append(str(d))
+            elif z.lower()=='float':
+                data.append(round(d,4))
+            elif z.lower()=='double':
+                data.append(round(d,4))
+            else:
+                data.append(d)
+        print(str_f1.format(cell['rowid'], *data))
     return None
 
-
-def drop_table_backend(table_name):
-    if os.path.exists(table_name+".tbl"):
-        os.remove(table_name+".tbl")
-        _, rows = schema_from_catalog(table_name, with_rowid=True)
-        rowids = [row['rowid'] for row in rows]
-        table_delete('davisbase_columns.tbl', rowids)
-        data = read_all_pages_in_file('davisbase_tables.tbl')
-        for page in data:
-            if not page['is_leaf']:
-                continue
-            for cell in page['cells']:
-                if table_name==cell['data'][0].lower():
-                    rowids = [cell['rowid']]
-                    break
-        table_delete('davisbase_tables.tbl', rowids)
-        for index in get_indexes(table_name):
-            os.remove(index)
-    else:
-        print("Table \"{}\" does not exist.".format(table_name))
-    print_it("davisbase_columns.tbl", page_format=False)
-    print()
-    print_it("davisbase_tables.tbl", page_format=False)
-    return
 
 #############################################################################
 PAGE_SIZE = 512
@@ -2479,6 +2432,10 @@ if __name__== "__main__":
         out = check_input(command)
         if type(out)==bool:
             exit_command = True
+        elif out=='break':
+            pdb.set_trace()
+            break
+
         elif out==None:
             command=''
         else:
