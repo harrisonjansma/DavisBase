@@ -2049,7 +2049,10 @@ def to_python(schema_columns, schema, column, v):
             except:
                 return datetime.strptime(v, '%Y-%m-%d')
         elif schema[i].lower()=='time':
-            return datetime.strptime("1/2/1970 "+v, '%m/%d/%Y %H:%M:%S')
+            try:
+                return datetime.strptime("1/2/1970 "+v, '%m/%d/%Y %H:%M:%S')
+            except:
+                return datetime.strptime("1/2/1970 "+v, '%m/%d/%Y %I:%M%p')
         else:
             return py(v)
     else:
@@ -2394,7 +2397,7 @@ def print_cells(table_name, cells):
             elif z.lower()=='date':
                 data.append(str(d.date()))
             elif z.lower()=='time':
-                data.append(ste(d.time()))
+                data.append(str(d))
             elif z.lower()=='datetime':
                 data.append(str(d))
             elif z.lower()=='float':

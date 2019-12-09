@@ -4,9 +4,9 @@ TESTS
 CREATE TABLE test_table ( pk int Primary key, issmall_num smallint, isbig_num bigint, isfloat float, istext text, isdate date, isyear year, istime time, alwaysnull tinyint );
 
 
-INSERT INTO test_table (pk, issmall_num, isbig_num, isfloat, istext, isdate, isyear )
+INSERT INTO test_table (pk, issmall_num, isbig_num, isfloat, istext, isdate, isyear, istime)
 VALUES
-(1,30,20259,847.844,grigg0@alexa.com,10/25/2019,2013
+(1,30,20259,847.844,grigg0@alexa.com,10/25/2019,2013, NULL
 ),
 (3,51,14838,866.835,kdurban2@fastcompany.com,11/25/2019,2014,9:16 AM,
 ),
