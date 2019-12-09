@@ -7,6 +7,7 @@ import operator
 import shlex
 import re
 import pdb
+from operator import itemgetter
 
 ############################################################################
 
@@ -1150,7 +1151,7 @@ def update(command):
     "column4":new_value_to_update_to,
     }"""
     table_name, condition, dict_new_values = parse_update(command)
-    cells = WHERE_FUNCTION(table_name, condition)
+    table_name, cells = where(command)
     list_of_rowids = [c['rowid'] for c in cells]
     table_update(table_name+'.tbl', list_of_rowids, dict_new_values)
 """for filename in indexes:
@@ -1868,7 +1869,6 @@ def merge_children(pages, page_num, child_page_num, left=True):
     page = pages[page_num]
     page_children = [i['left_child_page'] for i in pages[page_num]['cells']]
     child_page = pages[child_page_num]
-
     if left:
         lsib = pages[child_page['left_sibling_page']]
         id2del = page['cells'][page_children.index(lsib['page_number'])]['rowid']
@@ -2071,6 +2071,21 @@ def dtype_to_python(dtype):
     mapping = {"null":None,"tinyint":int, "smallint":int, "int":int, "bigint":int, "long":int, 'float':float, "double":float, "year":int, "time":datetime, "datetime":datetime, "date":datetime, "text":str}
     return mapping[dtype]
 
+def to_python(schema_columns, schema, column, v):
+    i = schema_columns.index(column)
+    py = dtype_to_python(schema[i])
+    if py != None:
+        if schema[i].lower()=='datetime':
+            return datetime.strptime(v, '%m/%d/%Y %H:%M:%S')
+        elif schema[i].lower()=='date':
+            return datetime.strptime(v, '%m/%d/%Y')
+        elif schema[i].lower()=='time':
+            return datetime.strptime(v, '%H:%M:%S')
+        else:
+            return py(v)
+
+
+
 def extract_definitions(token_list):
     '''
     Subordinate function for create table to get column names and their definitions
@@ -2253,7 +2268,7 @@ def parse_update(command):
         where_clause = str(stmt.tokens[-1])
         where_clause = re.sub("\s", "", re.split(';',re.sub("(?i)where","",where_clause))[0])
         res = [i for i in operator_list if where_clause.find(i)!=-1]
-        where_clause = re.split('=|>|<|>=|<=|\s',where_clause)
+        where_clause = re.split('>=|<=|=|>|<|\s',where_clause)
         set_col = itemgetter(*[0,-1])(re.split('=',str(stmt.tokens[-3])))
         set_value = set_col[1]
         set_col = set_col[0]
@@ -2334,6 +2349,7 @@ def query(command: str):
 
 def where(SQL):
     where_op, where_value, oper, table_name, columns =  query(SQL)
+    schema, _ = schema_from_catalog(table_name)
     if not os.path.exists(table_name.lower()+'.tbl'):
         print("Table {} does not exist.".format(table_name))
         return None, None
@@ -2348,11 +2364,11 @@ def where(SQL):
             for cell in node['cells']:
                 data = cell['data']
                 if index == 0 :
-                    op1 = str(cell['rowid'])
-                    op2 = where_value
+                    op1 = cell['rowid']
+                    op2 = int(where_value)
                 else:
-                    op1 = str(where_value)
-                    op2 = str(data[index - 1])
+                    op2 = to_python(column_list, schema, where_op.lower(), where_value)
+                    op1 = data[index - 1]
                 if get_operator_fn(oper)(op1, op2):
                     matched_cells.append(cell)
     return table_name, matched_cells
